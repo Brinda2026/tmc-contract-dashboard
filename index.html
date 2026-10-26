@@ -146,6 +146,12 @@
       <p class="notice" id="extractNotice" hidden></p>
 
       <div id="factFields" hidden>
+        <div class="rescan-row" >
+          <button type="button" class="btn ghost sm" id="rescanBtn" hidden>
+            <svg viewBox="0 0 24 24" width="14" height="14" aria-hidden="true"><path d="M20 11a8 8 0 1 0-2.3 5.7M20 4v7h-7" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+            Re-read facts from document
+          </button>
+        </div>
         <div class="field-grid">
           <label class="span-2">Contract name<input name="title" required></label>
           <label>Counterparty<input name="counterparty"></label>
@@ -153,11 +159,12 @@
           <label class="span-2">Parties<input name="parties"></label>
           <label>Start / effective date<input name="effectiveDate" type="date"></label>
           <label>Closing / end date<input name="endDate" type="date"><span class="hint" id="endHint"></span></label>
-          <label>Tenure<input name="tenure" placeholder="e.g. 3 years"></label>
-          <label>Contract value<input name="value" placeholder="e.g. ₹12,00,000"></label>
+          <label>Tenure<input name="tenure" placeholder="e.g. 2 years"><span class="hint">Closing date is calculated from start date + tenure</span></label>
+          <label>Contract value<input name="value" placeholder="e.g. ₹12,00,000"><span class="hint">Total value, if the contract states one</span></label>
           <label>Notice period (days)<input name="noticeDays" type="number" min="0" step="1"></label>
           <label>Owner at TMC<input name="owner" placeholder="Who manages it"></label>
           <label>Governing law<input name="governingLaw"></label>
+          <label class="span-2">Fees &amp; payment terms<textarea name="fees" rows="2" placeholder="e.g. ₹20,000 per candidate, payable on arrival"></textarea></label>
           <label class="span-2">Renewal terms<textarea name="renewal" rows="2"></textarea></label>
           <label class="span-2">Notes<textarea name="notes" rows="2"></textarea></label>
         </div>

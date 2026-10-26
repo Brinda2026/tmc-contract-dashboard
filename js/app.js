@@ -4,7 +4,7 @@
   'use strict';
 
   const { GitHubStore, loadConfig, saveConfig, clearConfig } = window.ContractStore;
-  const { readText, analyze } = window.ContractExtract;
+  const { readText, analyze, addTerm, parseTenure } = window.ContractExtract;
 
   const $ = (s, el = document) => el.querySelector(s);
   const $$ = (s, el = document) => [...el.querySelectorAll(s)];
@@ -219,7 +219,7 @@
   function visibleContracts() {
     const q = state.search.trim().toLowerCase();
     const list = state.contracts.filter(matchesFilter).filter((c) =>
-      !q || [c.title, c.counterparty, c.parties, c.type, c.owner, c.notes, c.value].join(' ').toLowerCase().includes(q));
+      !q || [c.title, c.counterparty, c.parties, c.type, c.owner, c.notes, c.value, c.fees].join(' ').toLowerCase().includes(q));
     const { key, dir } = state.sort;
     const val = (c) => {
       if (key === 'status') return STATUS_ORDER.indexOf(statusOf(c));
@@ -344,6 +344,7 @@
         ${fact('Owner at TMC', c.owner)}
         ${fact('Governing law', c.governingLaw)}
       </dl>
+      ${c.fees ? `<div class="block"><h3>Fees &amp; payment terms</h3><p class="pre">${esc(c.fees)}</p></div>` : ''}
       ${c.renewal ? `<div class="block"><h3>Renewal</h3><p>${esc(c.renewal)}</p></div>` : ''}
       ${c.notes ? `<div class="block"><h3>Notes</h3><p class="pre">${esc(c.notes)}</p></div>` : ''}
 
@@ -470,8 +471,12 @@
     $('#endHint').textContent = '';
     $('#msHint').hidden = !!contract;
     $('#msEdit').innerHTML = '';
+    $('#rescanBtn').hidden = !contract?.file;
+    state.extracted = null;
+    state.autoEnd = !!contract?.endCalculated;
     if (contract) {
       fillFields(contract);
+      if (state.autoEnd) $('#endHint').textContent = 'Calculated from start date + tenure';
       $('#msEdit').innerHTML = (contract.milestones || []).map((m) => msRow({ ...m, include: true })).join('');
     }
     $('#editDialog').showModal();
@@ -479,14 +484,43 @@
 
   function fillFields(v) {
     const f = $('#editForm');
-    for (const k of ['title', 'counterparty', 'type', 'parties', 'effectiveDate', 'endDate', 'tenure', 'value', 'noticeDays', 'owner', 'governingLaw', 'renewal', 'notes']) {
+    for (const k of ['title', 'counterparty', 'type', 'parties', 'effectiveDate', 'endDate', 'tenure', 'value', 'noticeDays', 'owner', 'governingLaw', 'renewal', 'fees', 'notes']) {
       if (f[k]) f[k].value = v[k] ?? '';
     }
   }
 
-  async function handleFile(file) {
+  // Fill the closing date from start date + tenure, unless someone typed their own.
+  function recalcEnd() {
+    const f = $('#editForm');
+    const t = parseTenure(f.tenure.value);
+    if (!f.effectiveDate.value || !t) {
+      if (state.autoEnd) { f.endDate.value = ''; $('#endHint').textContent = ''; }
+      return;
+    }
+    if (f.endDate.value && !state.autoEnd) return;
+    f.endDate.value = addTerm(f.effectiveDate.value, t.n, t.unit);
+    state.autoEnd = true;
+    $('#endHint').textContent = 'Calculated from start date + tenure — please check';
+  }
+
+  async function rescan() {
+    const c = state.editing;
+    if (!c?.file) return;
+    const btn = $('#rescanBtn');
+    btn.disabled = true;
+    try {
+      const blob = await state.store.downloadFile(c.file.path);
+      await handleFile(new File([blob], c.file.name, { type: c.file.mime || blob.type }), true);
+    } catch (e) {
+      toast(e.message, 'err');
+    } finally {
+      btn.disabled = false;
+    }
+  }
+
+  async function handleFile(file, rescanning) {
     if (!file) return;
-    state.pendingFile = file;
+    if (!rescanning) state.pendingFile = file;
     const notice = $('#extractNotice');
     notice.hidden = false;
     notice.className = 'notice';
@@ -499,20 +533,34 @@
       console.error(e);
       facts = analyze('', file.name, 'DMY');
     }
-    fillFields({ ...facts, owner: '', notes: '' });
+    const f = $('#editForm');
+    const keep = rescanning ? { owner: f.owner.value, notes: f.notes.value } : { owner: '', notes: '' };
+    // when re-reading, keep dates someone already entered if the document has none
+    if (rescanning && !facts.effectiveDate) { facts.effectiveDate = f.effectiveDate.value; facts.endDate = f.endDate.value; facts.endCalculated = state.autoEnd; }
+    fillFields({ ...facts, ...keep });
     state.extracted = facts;
+    state.autoEnd = !!facts.endCalculated;
     $('#endHint').textContent = facts.endCalculated ? 'Calculated from start date + tenure — please check' : '';
+    recalcEnd();
     const todayIso = toIso(today());
     // past dates are usually history, so they start unticked
-    $('#msEdit').innerHTML = facts.milestones.map((m) => msRow({ ...m, include: m.include && m.date >= todayIso })).join('');
+    const existing = new Set($$('#msEdit .ms-date').map((i) => i.value));
+    const rows = facts.milestones.filter((m) => !existing.has(m.date)).map((m) => msRow({ ...m, include: m.include && m.date >= todayIso })).join('');
+    if (rescanning) $('#msEdit').insertAdjacentHTML('beforeend', rows); else $('#msEdit').innerHTML = rows;
     $('#msHint').hidden = !facts.milestones.length;
     $('#factFields').hidden = false;
     $('#saveBtn').disabled = false;
-    $('#dropZone').classList.add('has-file');
-    $('#dropZone p').innerHTML = `<strong>${esc(file.name)}</strong> · ${fmtSize(file.size)} — click to choose a different file`;
+    if (!rescanning) {
+      $('#dropZone').classList.add('has-file');
+      $('#dropZone p').innerHTML = `<strong>${esc(file.name)}</strong> · ${fmtSize(file.size)} — click to choose a different file`;
+    }
     if (facts.textFound) {
       notice.className = 'notice ok';
       notice.textContent = `Facts were filled in automatically from the document. Please check them before saving${facts.milestones.length ? `; ${facts.milestones.length} dates found below` : ''}.`;
+      if (facts.datesBlank && !f.effectiveDate.value) {
+        notice.className = 'notice warn';
+        notice.textContent = `The signing / start date is left blank in this document (it looks like an unsigned copy). Enter the start date below${facts.tenure ? ` and the closing date will be calculated from the ${facts.tenure.replace(/ from .*/, '')} tenure` : ''}. Other facts were filled in; please check them.`;
+      }
     } else {
       notice.className = 'notice warn';
       notice.textContent = 'No readable text was found (this is common for scanned PDFs). The file will still be stored. Please type the key facts below.';
@@ -538,18 +586,15 @@
       title: get('title'), counterparty: get('counterparty'), type: get('type'), parties: get('parties'),
       effectiveDate: get('effectiveDate'), endDate: get('endDate'), tenure: get('tenure'), value: get('value'),
       noticeDays: get('noticeDays') ? Number(get('noticeDays')) : '', owner: get('owner'), governingLaw: get('governingLaw'),
-      renewal: get('renewal'), notes: get('notes'), milestones: readMilestones(),
+      renewal: get('renewal'), fees: get('fees'), notes: get('notes'), milestones: readMilestones(),
     };
     if (!fields.title) { err.textContent = 'Please give the contract a name.'; err.hidden = false; return; }
     if (fields.effectiveDate && fields.endDate && fields.endDate < fields.effectiveDate) { err.textContent = 'The closing date is before the start date.'; err.hidden = false; return; }
-    const ext = state.extracted;
-    fields.endCalculated = !!(ext && ext.endCalculated && ext.endDate === fields.endDate && !state.editing);
+    fields.endCalculated = !!(state.autoEnd && fields.endDate);
     $('#saveBtn').disabled = true;
     try {
       if (state.editing) {
         const id = state.editing.id;
-        if (state.editing.endDate !== fields.endDate) fields.endCalculated = false;
-        else fields.endCalculated = state.editing.endCalculated || false;
         $('#editDialog').close();
         await save((d) => { const c = find(d, id); if (c) Object.assign(c, fields, { updatedAt: new Date().toISOString() }); }, `Update ${fields.title}`);
         toast('Changes saved');
@@ -578,7 +623,7 @@
   // ---------- CSV export ----------
 
   function exportCsv() {
-    const cols = ['title', 'counterparty', 'type', 'status', 'effectiveDate', 'endDate', 'tenure', 'value', 'noticeDays', 'noticeDeadline', 'nextMilestone', 'nextMilestoneDate', 'owner', 'governingLaw', 'renewal', 'notes'];
+    const cols = ['title', 'counterparty', 'type', 'status', 'effectiveDate', 'endDate', 'tenure', 'value', 'noticeDays', 'noticeDeadline', 'nextMilestone', 'nextMilestoneDate', 'owner', 'governingLaw', 'fees', 'renewal', 'notes'];
     const rows = visibleContracts().map((c) => {
       const n = nextEvent(c);
       return {
@@ -687,6 +732,9 @@
       $('#msEdit li:last-child .ms-date').focus();
     });
     $('#editForm').addEventListener('submit', submitEdit);
+    $('#rescanBtn').addEventListener('click', rescan);
+    ['effectiveDate', 'tenure'].forEach((k) => $(`#editForm [name=${k}]`).addEventListener('input', recalcEnd));
+    $('#editForm [name=endDate]').addEventListener('input', () => { state.autoEnd = false; $('#endHint').textContent = ''; });
 
     // keep it live: refresh when you come back to the tab and every 2 minutes
     document.addEventListener('visibilitychange', () => { if (!document.hidden) reload(true); });
