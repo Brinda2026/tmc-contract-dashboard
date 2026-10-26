@@ -29,6 +29,16 @@
     return new TextDecoder().decode(bytes);
   }
 
+  // Turns a failed GitHub response into a message that says what to do about it.
+  async function ghError(res, what) {
+    let msg = '';
+    try { msg = (await res.clone().json()).message || ''; } catch { /* not JSON */ }
+    if (res.status === 401) return new Error(`${what}: GitHub rejected the access token. It may have expired; create a new one and reconnect in Settings.`);
+    if (res.status === 403 && /rate limit/i.test(msg)) return new Error(`${what}: GitHub's rate limit was hit. Wait a few minutes and try again.`);
+    if (res.status === 403) return new Error(`${what}: the access token is not allowed to write to this repository. On GitHub, edit the token and set Repository permissions → Contents to "Read and write" (with tmc-contracts-data selected), then try again.`);
+    return new Error(`${what} (GitHub ${res.status}${msg ? ': ' + msg : ''})`);
+  }
+
   class GitHubStore {
     constructor(cfg) {
       this.cfg = cfg;
@@ -72,7 +82,7 @@
     async loadIndex() {
       const res = await this.req('GET', INDEX_PATH);
       if (res.status === 404) { this.sha = null; return { version: 1, contracts: [] }; }
-      if (!res.ok) throw new Error(`Could not load contracts (GitHub ${res.status})`);
+      if (!res.ok) throw await ghError(res, 'Could not load contracts');
       const meta = await res.json();
       this.sha = meta.sha;
       let text;
@@ -92,7 +102,7 @@
         message, content: bytesToB64(bytes), branch: this.cfg.branch, ...(this.sha ? { sha: this.sha } : {}),
       });
       if (res.status === 409 || res.status === 422) return false; // someone else saved first
-      if (!res.ok) throw new Error(`Could not save (GitHub ${res.status})`);
+      if (!res.ok) throw await ghError(res, 'Could not save');
       this.sha = (await res.json()).content.sha;
       return true;
     }
@@ -111,14 +121,14 @@
       const bytes = new Uint8Array(await file.arrayBuffer());
       const res = await this.req('PUT', path, { message: `Upload ${file.name}`, content: bytesToB64(bytes), branch: this.cfg.branch });
       if (!res.ok) {
-        const detail = res.status === 413 || res.status === 422 ? ' The file may be too large (keep it under ~50 MB).' : '';
-        throw new Error(`Could not upload the file (GitHub ${res.status}).${detail}`);
+        if (res.status === 413 || res.status === 422) throw new Error(`Could not upload the file (GitHub ${res.status}). The file may be too large (keep it under ~50 MB).`);
+        throw await ghError(res, 'Could not upload the file');
       }
     }
 
     async downloadFile(path) {
       const res = await this.req('GET', path, null, 'application/vnd.github.raw');
-      if (!res.ok) throw new Error(`Could not download the file (GitHub ${res.status})`);
+      if (!res.ok) throw await ghError(res, 'Could not download the file');
       return await res.blob();
     }
 
