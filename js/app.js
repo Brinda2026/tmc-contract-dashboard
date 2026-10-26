@@ -4,7 +4,7 @@
   'use strict';
 
   const { GitHubStore, loadConfig, saveConfig, clearConfig } = window.ContractStore;
-  const { readText, analyze, addTerm, parseTenure } = window.ContractExtract;
+  const { readText, analyze, addTerm, parseTenure, classify } = window.ContractExtract;
 
   const $ = (s, el = document) => el.querySelector(s);
   const $$ = (s, el = document) => [...el.querySelectorAll(s)];
@@ -20,7 +20,26 @@
     editing: null, // contract being edited, or null for a new upload
     pendingFile: null,
     lastLoaded: null,
+    category: (() => { try { return localStorage.getItem('tmc.tab') || 'all'; } catch { return 'all'; } })(),
+    subtype: '',
   };
+
+  const CATEGORIES = {
+    b2b: { label: 'B2B', desc: 'Clients · Consultant teachers · Vendors', subtypes: ['Client', 'Consultant / Teacher', 'Vendor'] },
+    rtd: { label: 'RTD', desc: 'Clients · Sourcing partners', subtypes: ['Client', 'Sourcing partner'] },
+    compliance: { label: 'Compliance', desc: 'GST · Income tax · ROC filings', subtypes: ['GST', 'Income tax / TDS', 'ROC / MCA', 'Licence / registration', 'Other'] },
+  };
+  const isComp = (c) => c.category === 'compliance';
+  function catTag(c) {
+    const k = CATEGORIES[c.category];
+    return k ? `<span class="cat-tag ${c.category}">${k.label}</span>${esc(c.subtype || '')}` : '<span class="cat-tag none">No category</span>';
+  }
+  function inScope(c) {
+    if (state.category === 'all') return true;
+    if (state.category === 'none') return !CATEGORIES[c.category];
+    return c.category === state.category;
+  }
+  function scoped() { return state.contracts.filter(inScope); }
 
   // ---------- helpers ----------
 
@@ -72,7 +91,7 @@
 
   function statusOf(c) {
     const end = daysUntil(c.endDate);
-    const start = daysUntil(c.effectiveDate);
+    const start = isComp(c) ? null : daysUntil(c.effectiveDate);
     if (end !== null && end < 0) return 'expired';
     if (start !== null && start > 0) return 'upcoming';
     if (end === null) return 'open';
@@ -82,6 +101,11 @@
 
   function eventsOf(c) {
     const ev = (c.milestones || []).map((m) => ({ ...m, kind: 'milestone', contract: c }));
+    if (isComp(c)) {
+      const what = c.subtype === 'Licence / registration' ? 'Renewal / validity ends' : `Next ${c.subtype || 'compliance'} filing due`;
+      if (c.endDate) ev.push({ id: 'end', date: c.endDate, label: what, kind: 'due', contract: c });
+      return ev.filter((e) => e.date).sort((a, b) => a.date.localeCompare(b.date));
+    }
     if (c.endDate) ev.push({ id: 'end', date: c.endDate, label: 'Contract closes / expires', kind: 'end', contract: c });
     if (c.endDate && Number(c.noticeDays) > 0) {
       ev.push({ id: 'notice', date: addDays(c.endDate, -Number(c.noticeDays)), label: `Last day to give ${c.noticeDays}-day notice (renewal / termination)`, kind: 'notice', contract: c });
@@ -100,9 +124,11 @@
     return Math.min(100, Math.max(0, Math.round(((today() - s) / (e - s)) * 100)));
   }
 
-  function badge(st) {
+  const COMP_LABEL = { active: 'Up to date', expiring: 'Due soon', expired: 'Overdue', upcoming: 'Not yet effective', open: 'No due date' };
+  function statusLabel(st, comp) { return comp ? COMP_LABEL[st] : STATUS[st].label; }
+  function badge(st, c) {
     const s = STATUS[st];
-    return `<span class="badge ${s.cls}"><span class="b-icon" aria-hidden="true">${s.icon}</span>${s.label}</span>`;
+    return `<span class="badge ${s.cls}"><span class="b-icon" aria-hidden="true">${s.icon}</span>${statusLabel(st, c && isComp(c))}</span>`;
   }
 
   // ---------- loading ----------
@@ -164,18 +190,41 @@
   // ---------- rendering ----------
 
   function render() {
+    renderTabs();
     renderKpis();
     renderFilters();
     renderTable();
     renderTimeline();
   }
 
+  function renderTabs() {
+    const n = (k) => state.contracts.filter((c) => (k === 'all' ? true : k === 'none' ? !CATEGORIES[c.category] : c.category === k)).length;
+    const tabs = [['all', 'All', ''], ...Object.entries(CATEGORIES).map(([k, v]) => [k, v.label, v.desc])];
+    if (n('none')) tabs.push(['none', 'No category', '']);
+    if (state.category === 'none' && !n('none')) state.category = 'all';
+    $('#catTabs').innerHTML = tabs.map(([k, l, d]) =>
+      `<button class="cat-tab" role="tab" data-cat="${k}" aria-selected="${state.category === k}">${l}<span class="count">${n(k)}</span>${d ? `<span class="desc hide-md">${d}</span>` : ''}</button>`).join('');
+    const subs = CATEGORIES[state.category]?.subtypes || [];
+    if (!subs.includes(state.subtype)) state.subtype = '';
+    const sf = $('#subFilter');
+    sf.hidden = !subs.length;
+    sf.innerHTML = `<option value="">All types</option>` + subs.map((x) => `<option ${x === state.subtype ? 'selected' : ''}>${esc(x)}</option>`).join('');
+    const comp = state.category === 'compliance';
+    $('#listTitle').textContent = comp ? 'Compliance documents' : state.category === 'all' ? 'Contracts & documents' : `${CATEGORIES[state.category]?.label || ''} contracts`.trim();
+    $('#thName').textContent = comp ? 'Document' : state.category === 'all' ? 'Name' : 'Contract';
+    $('#thParty').textContent = comp ? 'Authority' : state.category === 'all' ? 'Counterparty / authority' : 'Counterparty';
+    $('#thEnd').textContent = comp ? 'Next due date' : state.category === 'all' ? 'Closing / due date' : 'Closing date';
+    $('#search').placeholder = comp ? 'Search documents…' : 'Search contracts…';
+  }
+
   function renderKpis() {
-    const counts = { all: state.contracts.length, active: 0, expiring: 0, expired: 0 };
+    const list = scoped();
+    const comp = state.category === 'compliance';
+    const counts = { all: list.length, active: 0, expiring: 0, expired: 0 };
     let next = null;
-    for (const c of state.contracts) {
+    for (const c of list) {
       const s = statusOf(c);
-      if (s === 'active' || s === 'expiring' || s === 'open') counts.active++;
+      if (s === 'active' || s === 'open' || (s === 'expiring' && !comp)) counts.active++;
       if (s === 'expiring') counts.expiring++;
       if (s === 'expired') counts.expired++;
       const n = nextEvent(c);
@@ -187,11 +236,16 @@
         <span class="kpi-value">${value}</span>
         <span class="kpi-sub">${sub}</span>
       </button>`;
-    $('#kpis').innerHTML =
-      tile('all', 'Total contracts', counts.all, 'on record') +
-      tile('active', 'Active', counts.active, 'currently in force') +
-      tile('expiring', 'Expiring soon', counts.expiring, `closing within ${expiringDays()} days`) +
-      tile('expired', 'Expired', counts.expired, 'past closing date') +
+    $('#kpis').innerHTML = comp
+      ? tile('all', 'Documents', counts.all, 'on record') +
+        tile('active', 'Up to date', counts.active, 'nothing due yet') +
+        tile('expiring', 'Due soon', counts.expiring, `due within ${expiringDays()} days`) +
+        tile('expired', 'Overdue', counts.expired, 'past the due date')
+      : tile('all', state.category === 'all' ? 'Total on record' : 'Total contracts', counts.all, state.category === 'all' ? 'contracts & documents' : 'on record') +
+        tile('active', 'Active', counts.active, 'in force / up to date') +
+        tile('expiring', 'Expiring / due soon', counts.expiring, `within ${expiringDays()} days`) +
+        tile('expired', 'Expired / overdue', counts.expired, 'past closing or due date');
+    $('#kpis').innerHTML +=
       `<button class="kpi next" ${next ? `data-open="${esc(next.contract.id)}"` : 'disabled'}>
         <span class="kpi-label">Next deadline</span>
         <span class="kpi-value sm">${next ? esc(relDays(daysUntil(next.date))) : '—'}</span>
@@ -211,15 +265,17 @@
   }
 
   function renderFilters() {
-    const count = (f) => state.contracts.filter((c) => { const keep = state.filter; state.filter = f; const r = matchesFilter(c); state.filter = keep; return r; }).length;
-    $('#filters').innerHTML = FILTERS.map(([k, l]) =>
+    const comp = state.category === 'compliance';
+    const label = { active: comp ? 'Up to date' : 'Active', expiring: comp ? 'Due soon' : 'Expiring soon', upcoming: 'Not started', open: comp ? 'No due date' : 'No end date', expired: comp ? 'Overdue' : 'Expired' };
+    const count = (f) => scoped().filter((c) => !state.subtype || c.subtype === state.subtype).filter((c) => { const keep = state.filter; state.filter = f; const r = matchesFilter(c); state.filter = keep; return r; }).length;
+    $('#filters').innerHTML = FILTERS.filter(([k]) => !(comp && k === 'upcoming')).map(([k, l]) => [k, label[k] || l]).map(([k, l]) =>
       `<button class="chip" role="tab" data-filter="${k}" aria-selected="${state.filter === k}">${l}<span class="count">${count(k)}</span></button>`).join('');
   }
 
   function visibleContracts() {
     const q = state.search.trim().toLowerCase();
-    const list = state.contracts.filter(matchesFilter).filter((c) =>
-      !q || [c.title, c.counterparty, c.parties, c.type, c.owner, c.notes, c.value, c.fees].join(' ').toLowerCase().includes(q));
+    const list = scoped().filter((c) => !state.subtype || c.subtype === state.subtype).filter(matchesFilter).filter((c) =>
+      !q || [c.title, c.counterparty, c.parties, c.type, c.subtype, c.owner, c.notes, c.value, c.fees, c.period, c.reference, c.ids].join(' ').toLowerCase().includes(q));
     const { key, dir } = state.sort;
     const val = (c) => {
       if (key === 'status') return STATUS_ORDER.indexOf(statusOf(c));
@@ -232,8 +288,10 @@
 
   function renderTable() {
     const rows = visibleContracts();
-    $('#emptyState').hidden = state.contracts.length > 0;
-    $('#contractTable').hidden = state.contracts.length === 0;
+    const any = scoped().length > 0;
+    $('#emptyState').hidden = any;
+    $('#contractTable').hidden = !any;
+    $('#emptyState p').innerHTML = `<strong>${state.category === 'compliance' ? 'No compliance documents yet.' : state.category === 'all' ? 'No contracts yet.' : `No ${CATEGORIES[state.category]?.label || ''} contracts yet.`}</strong>`;
     $$('#contractTable th[data-sort]').forEach((th) => {
       th.setAttribute('aria-sort', th.dataset.sort === state.sort.key ? (state.sort.dir > 0 ? 'ascending' : 'descending') : 'none');
     });
@@ -248,11 +306,11 @@
       const n = nextEvent(c);
       const left = daysUntil(c.endDate);
       return `<tr data-open="${esc(c.id)}" tabindex="0" class="${state.openId === c.id ? 'selected' : ''}">
-        <td><div class="t-title">${esc(c.title)}</div><div class="t-sub">${esc(c.type || '')}${c.type && c.value ? ' · ' : ''}${esc(c.value || '')}</div></td>
+        <td><div class="t-title">${esc(c.title)}</div><div class="t-sub">${catTag(c)}${c.value ? ' · ' + esc(c.value) : ''}</div></td>
         <td class="hide-md">${esc(c.counterparty || '—')}</td>
         <td><div>${fmtDate(c.endDate)}</div><div class="t-sub">${c.endDate ? esc(relDays(left)) : ''}</div></td>
-        <td class="hide-sm">${pct === null ? '<span class="muted">—</span>' : `<div class="bar" title="${pct}% of the tenure has passed"><span style="width:${pct}%"></span></div><div class="t-sub">${pct}%${c.tenure ? ' of ' + esc(c.tenure) : ''}</div>`}</td>
-        <td>${badge(st)}</td>
+        <td class="hide-sm">${isComp(c) ? `<div>${esc(c.period || '—')}</div><div class="t-sub">${c.effectiveDate ? 'filed ' + fmtDate(c.effectiveDate) : ''}</div>` : pct === null ? '<span class="muted">—</span>' : `<div class="bar" title="${pct}% of the tenure has passed"><span style="width:${pct}%"></span></div><div class="t-sub">${pct}%${c.tenure ? ' of ' + esc(c.tenure) : ''}</div>`}</td>
+        <td>${badge(st, c)}</td>
         <td class="hide-md">${n ? `<div class="t-clip">${esc(n.label)}</div><div class="t-sub">${fmtDate(n.date)} · ${esc(relDays(daysUntil(n.date)))}</div>` : '<span class="muted">—</span>'}</td>
       </tr>`;
     }).join('');
@@ -260,18 +318,18 @@
 
   function renderTimeline() {
     const horizon = Number($('#horizon').value);
-    const all = state.contracts.flatMap(eventsOf);
-    const overdue = all.filter((e) => e.kind === 'milestone' && !e.done && daysUntil(e.date) < 0 && daysUntil(e.date) >= -180);
+    const all = scoped().flatMap(eventsOf);
+    const overdue = all.filter((e) => (e.kind === 'milestone' || e.kind === 'due') && !e.done && daysUntil(e.date) < 0 && daysUntil(e.date) >= -180);
     const soon = all.filter((e) => !e.done && daysUntil(e.date) >= 0 && daysUntil(e.date) <= horizon);
     const item = (e) => {
       const d = daysUntil(e.date);
       const urgency = d < 0 ? 'critical' : d <= 14 ? 'serious' : d <= 45 ? 'warning' : 'calm';
-      const kindLabel = { end: 'Closing date', notice: 'Notice deadline', start: 'Start', milestone: 'Milestone' }[e.kind];
+      const kindLabel = { end: 'Closing date', notice: 'Notice deadline', start: 'Start', milestone: 'Milestone', due: 'Compliance due' }[e.kind];
       return `<li class="tl-item ${urgency}" data-open="${esc(e.contract.id)}" tabindex="0">
         <div class="tl-date"><span class="tl-day">${parse(e.date).getDate()}</span><span class="tl-mon">${parse(e.date).toLocaleDateString('en-GB', { month: 'short' })}</span></div>
         <div class="tl-body">
           <div class="tl-label">${esc(e.label)}</div>
-          <div class="t-sub">${esc(e.contract.title)}</div>
+          <div class="t-sub">${CATEGORIES[e.contract.category] ? `<span class="cat-tag ${e.contract.category}">${CATEGORIES[e.contract.category].label}</span>` : ''}${esc(e.contract.title)}</div>
           <div class="tl-meta"><span class="tag">${kindLabel}</span><span class="when">${esc(relDays(d))}</span></div>
         </div>
       </li>`;
@@ -314,26 +372,36 @@
     $('#drawerBody').innerHTML = `
       <div class="drawer-head">
         <div>
-          <p class="eyebrow">${esc(c.type || 'Contract')}</p>
+          <p class="eyebrow">${catTag(c)}${!isComp(c) && c.type ? ' · ' + esc(c.type) : ''}</p>
           <h2 id="drawerTitle">${esc(c.title)}</h2>
-          ${badge(st)}
+          ${badge(st, c)}
         </div>
         <button class="icon-btn" data-action="close" aria-label="Close">✕</button>
       </div>
 
       <section class="hero">
         <div>
-          <span class="kpi-label">${left === null ? 'Closing date' : left < 0 ? 'Closed' : 'Closes'}</span>
-          <span class="hero-value">${c.endDate ? esc(relDays(left)) : 'No end date'}</span>
-          <span class="t-sub">${c.endDate ? fmtDate(c.endDate) : 'Add an end date to track expiry'}</span>
+          <span class="kpi-label">${isComp(c) ? (left === null ? 'Next due date' : left < 0 ? 'Was due' : 'Next due') : left === null ? 'Closing date' : left < 0 ? 'Closed' : 'Closes'}</span>
+          <span class="hero-value">${c.endDate ? esc(relDays(left)) : isComp(c) ? 'No due date' : 'No end date'}</span>
+          <span class="t-sub">${c.endDate ? fmtDate(c.endDate) : isComp(c) ? 'Add the next due date or validity to get reminders' : 'Add an end date to track expiry'}</span>
         </div>
-        ${pct !== null ? `<div class="hero-bar">
+        ${pct !== null && !isComp(c) ? `<div class="hero-bar">
           <div class="bar lg"><span style="width:${pct}%"></span></div>
           <div class="bar-ends"><span>${fmtDate(c.effectiveDate)}</span><span>${pct}% elapsed</span><span>${fmtDate(c.endDate)}</span></div>
         </div>` : ''}
       </section>
 
-      <dl class="facts">
+      ${isComp(c) ? `<dl class="facts">
+        ${fact('Document type', c.subtype)}
+        ${fact('Authority / department', c.counterparty)}
+        ${fact('Period', c.period)}
+        ${fact('Reference no.', c.reference)}
+        ${fact('Filed / issue date', c.effectiveDate && fmtDate(c.effectiveDate))}
+        ${fact('Next due date / valid until', c.endDate && fmtDate(c.endDate), c.dueSuggested ? 'suggested from the return period, please check' : '')}
+        ${fact('Amount paid', c.value)}
+        ${fact('Registration IDs', c.ids)}
+        ${fact('Owner at TMC', c.owner)}
+      </dl>` : `<dl class="facts">
         ${fact('Counterparty', c.counterparty)}
         ${fact('Parties', c.parties)}
         ${fact('Start / effective date', c.effectiveDate && fmtDate(c.effectiveDate))}
@@ -343,20 +411,20 @@
         ${fact('Notice period', c.noticeDays ? `${c.noticeDays} days` : '', noticeDate ? `give notice by ${fmtDate(noticeDate)}` : '')}
         ${fact('Owner at TMC', c.owner)}
         ${fact('Governing law', c.governingLaw)}
-      </dl>
+      </dl>`}
       ${c.fees ? `<div class="block"><h3>Fees &amp; payment terms</h3><p class="pre">${esc(c.fees)}</p></div>` : ''}
       ${c.renewal ? `<div class="block"><h3>Renewal</h3><p>${esc(c.renewal)}</p></div>` : ''}
       ${c.notes ? `<div class="block"><h3>Notes</h3><p class="pre">${esc(c.notes)}</p></div>` : ''}
 
       <div class="block">
-        <div class="ms-head"><h3>Milestones &amp; key dates</h3></div>
+        <div class="ms-head"><h3>${isComp(c) ? 'Due dates &amp; reminders' : 'Milestones &amp; key dates'}</h3></div>
         <ul class="ms-list">
           ${events.length ? events.map((e) => {
             const d = daysUntil(e.date);
             const isMs = e.kind === 'milestone';
             const late = isMs && !e.done && d < 0;
             return `<li class="${e.done ? 'done' : ''} ${late ? 'late' : ''}">
-              ${isMs ? `<input type="checkbox" data-action="toggle" data-ms="${esc(e.id)}" ${e.done ? 'checked' : ''} aria-label="Mark done">` : `<span class="ms-dot ${e.kind}" aria-hidden="true"></span>`}
+              ${isMs ? `<input type="checkbox" data-action="toggle" data-ms="${esc(e.id)}" ${e.done ? 'checked' : ''} aria-label="Mark done">` : `<span class="ms-dot ${e.kind === 'due' ? 'notice' : e.kind}" aria-hidden="true"></span>`}
               <div class="ms-body">
                 <div>${esc(e.label)}</div>
                 <div class="t-sub">${fmtDate(e.date)} · ${e.done ? 'done' : late ? 'overdue ' + relDays(d).replace(' ago', '') : esc(relDays(d))}</div>
@@ -410,12 +478,12 @@
         setTimeout(() => URL.revokeObjectURL(url), 60000);
         busy(null);
       } else if (action === 'delete') {
-        if (!confirm(`Delete “${c.title}” and its document? This cannot be undone from the dashboard.`)) return;
+        if (!confirm(`Delete “${c.title}” and its file? This cannot be undone from the dashboard.`)) return;
         busy('Deleting…');
         if (c.file) await state.store.deleteFile(c.file.path);
         await save((d) => { d.contracts = d.contracts.filter((x) => x.id !== c.id); }, `Delete ${c.title}`);
         closeDrawer();
-        toast('Contract deleted');
+        toast('Deleted');
       }
     } catch (e) {
       busy(null);
@@ -461,19 +529,28 @@
     state.pendingFile = null;
     const f = $('#editForm');
     f.reset();
-    $('#editTitle').textContent = contract ? 'Edit contract' : 'Upload contract';
+    $('#editTitle').textContent = contract ? 'Edit details' : 'Upload contract or document';
     $('#dropZone').hidden = !!contract;
     $('#factFields').hidden = !contract;
     $('#extractNotice').hidden = true;
     $('#editError').hidden = true;
     $('#saveBtn').disabled = !contract;
-    $('#saveBtn').textContent = contract ? 'Save changes' : 'Save contract';
+    $('#saveBtn').textContent = contract ? 'Save changes' : 'Save';
     $('#endHint').textContent = '';
     $('#msHint').hidden = !!contract;
     $('#msEdit').innerHTML = '';
     $('#rescanBtn').hidden = !contract?.file;
     state.extracted = null;
     state.autoEnd = !!contract?.endCalculated;
+    state.dueSuggested = !!contract?.dueSuggested;
+    let cat = contract?.category || '', sub = contract?.subtype || '';
+    if (contract && !CATEGORIES[cat]) {
+      // older entries saved before categories existed: suggest one from what we know
+      const g = classify([contract.title, contract.type, contract.parties, contract.fees, contract.notes].join(' \n'), contract.title || '');
+      cat = g.category; sub = g.subtype;
+    }
+    if (!contract && CATEGORIES[state.category]) { cat = state.category; sub = state.subtype; }
+    setCategory(cat, sub, contract && !CATEGORIES[contract.category] && cat ? 'Suggested category, please check' : '');
     if (contract) {
       fillFields(contract);
       if (state.autoEnd) $('#endHint').textContent = 'Calculated from start date + tenure';
@@ -484,14 +561,27 @@
 
   function fillFields(v) {
     const f = $('#editForm');
-    for (const k of ['title', 'counterparty', 'type', 'parties', 'effectiveDate', 'endDate', 'tenure', 'value', 'noticeDays', 'owner', 'governingLaw', 'renewal', 'fees', 'notes']) {
+    for (const k of ['title', 'counterparty', 'type', 'parties', 'effectiveDate', 'endDate', 'tenure', 'value', 'noticeDays', 'owner', 'governingLaw', 'renewal', 'fees', 'notes', 'period', 'reference', 'ids']) {
       if (f[k]) f[k].value = v[k] ?? '';
     }
+  }
+
+  function setCategory(cat, sub, hint) {
+    const f = $('#editForm');
+    for (const r of $$('input[name=category]', f)) r.checked = r.value === cat;
+    const subs = CATEGORIES[cat]?.subtypes || [];
+    f.subtype.innerHTML = `<option value="">${cat ? 'Choose…' : 'Pick a category first'}</option>` + subs.map((x) => `<option ${x === sub ? 'selected' : ''}>${esc(x)}</option>`).join('');
+    f.subtype.disabled = !subs.length;
+    const comp = cat === 'compliance';
+    f.classList.toggle('is-compliance', comp);
+    $$('[data-c]', f).forEach((el) => { el.textContent = comp ? el.dataset.k : el.dataset.c; });
+    $('#catHint').textContent = hint || '';
   }
 
   // Fill the closing date from start date + tenure, unless someone typed their own.
   function recalcEnd() {
     const f = $('#editForm');
+    if (f.classList.contains('is-compliance')) return;
     const t = parseTenure(f.tenure.value);
     if (!f.effectiveDate.value || !t) {
       if (state.autoEnd) { f.endDate.value = ''; $('#endHint').textContent = ''; }
@@ -537,10 +627,14 @@
     const keep = rescanning ? { owner: f.owner.value, notes: f.notes.value } : { owner: '', notes: '' };
     // when re-reading, keep dates someone already entered if the document has none
     if (rescanning && !facts.effectiveDate) { facts.effectiveDate = f.effectiveDate.value; facts.endDate = f.endDate.value; facts.endCalculated = state.autoEnd; }
+    const curCat = f.category.value;
+    const cat = facts.category || curCat;
+    setCategory(cat, facts.category ? facts.subtype : f.subtype.value, facts.category ? 'Detected from the document, please check' : cat ? '' : 'Could not tell the category from the document, please choose one');
     fillFields({ ...facts, ...keep });
     state.extracted = facts;
     state.autoEnd = !!facts.endCalculated;
-    $('#endHint').textContent = facts.endCalculated ? 'Calculated from start date + tenure — please check' : '';
+    state.dueSuggested = !!facts.dueSuggested;
+    $('#endHint').textContent = facts.endCalculated ? 'Calculated from start date + tenure — please check' : facts.dueSuggested ? 'Suggested from the return period — please check' : '';
     recalcEnd();
     const todayIso = toIso(today());
     // past dates are usually history, so they start unticked
@@ -557,7 +651,7 @@
     if (facts.textFound) {
       notice.className = 'notice ok';
       notice.textContent = `Facts were filled in automatically from the document. Please check them before saving${facts.milestones.length ? `; ${facts.milestones.length} dates found below` : ''}.`;
-      if (facts.datesBlank && !f.effectiveDate.value) {
+      if (facts.datesBlank && !f.effectiveDate.value && cat !== 'compliance') {
         notice.className = 'notice warn';
         notice.textContent = `The signing / start date is left blank in this document (it looks like an unsigned copy). Enter the start date below${facts.tenure ? ` and the closing date will be calculated from the ${facts.tenure.replace(/ from .*/, '')} tenure` : ''}. Other facts were filled in; please check them.`;
       }
@@ -587,10 +681,16 @@
       effectiveDate: get('effectiveDate'), endDate: get('endDate'), tenure: get('tenure'), value: get('value'),
       noticeDays: get('noticeDays') ? Number(get('noticeDays')) : '', owner: get('owner'), governingLaw: get('governingLaw'),
       renewal: get('renewal'), fees: get('fees'), notes: get('notes'), milestones: readMilestones(),
+      category: f.category.value, subtype: f.subtype.value, period: get('period'), reference: get('reference'), ids: get('ids'),
+      dueSuggested: !!(state.dueSuggested && get('endDate')),
     };
-    if (!fields.title) { err.textContent = 'Please give the contract a name.'; err.hidden = false; return; }
-    if (fields.effectiveDate && fields.endDate && fields.endDate < fields.effectiveDate) { err.textContent = 'The closing date is before the start date.'; err.hidden = false; return; }
-    fields.endCalculated = !!(state.autoEnd && fields.endDate);
+    if (!CATEGORIES[fields.category]) { err.textContent = 'Please choose a category: B2B, RTD or Compliance.'; err.hidden = false; return; }
+    if (!fields.title) { err.textContent = 'Please give it a name.'; err.hidden = false; return; }
+    if (fields.category === 'compliance') {
+      // contract-only fields don't apply to compliance documents
+      Object.assign(fields, { type: '', parties: '', tenure: '', noticeDays: '', governingLaw: '', renewal: '', fees: '' });
+    } else if (fields.effectiveDate && fields.endDate && fields.endDate < fields.effectiveDate) { err.textContent = 'The closing date is before the start date.'; err.hidden = false; return; }
+    fields.endCalculated = !!(state.autoEnd && fields.endDate && fields.category !== 'compliance');
     $('#saveBtn').disabled = true;
     try {
       if (state.editing) {
@@ -609,7 +709,7 @@
         const record = { id, ...fields, file: { path, name: file.name, size: file.size, mime: file.type || '' }, createdAt: now, updatedAt: now };
         $('#editDialog').close();
         await save((d) => { d.contracts.push(record); }, `Add ${fields.title}`);
-        toast('Contract saved');
+        toast('Saved');
         openDrawer(id);
       }
     } catch (e) {
@@ -623,11 +723,11 @@
   // ---------- CSV export ----------
 
   function exportCsv() {
-    const cols = ['title', 'counterparty', 'type', 'status', 'effectiveDate', 'endDate', 'tenure', 'value', 'noticeDays', 'noticeDeadline', 'nextMilestone', 'nextMilestoneDate', 'owner', 'governingLaw', 'fees', 'renewal', 'notes'];
+    const cols = ['title', 'category', 'subtype', 'counterparty', 'type', 'status', 'period', 'reference', 'ids', 'effectiveDate', 'endDate', 'tenure', 'value', 'noticeDays', 'noticeDeadline', 'nextMilestone', 'nextMilestoneDate', 'owner', 'governingLaw', 'fees', 'renewal', 'notes'];
     const rows = visibleContracts().map((c) => {
       const n = nextEvent(c);
       return {
-        ...c, status: STATUS[statusOf(c)].label,
+        ...c, category: CATEGORIES[c.category]?.label || '', status: statusLabel(statusOf(c), isComp(c)),
         noticeDeadline: c.endDate && c.noticeDays ? addDays(c.endDate, -Number(c.noticeDays)) : '',
         nextMilestone: n?.label || '', nextMilestoneDate: n?.date || '',
       };
@@ -684,6 +784,13 @@
     $$('dialog [data-close]').forEach((b) => b.addEventListener('click', () => b.closest('dialog').close()));
 
     document.addEventListener('click', (e) => {
+      const tab = e.target.closest('[data-cat]');
+      if (tab) {
+        state.category = tab.dataset.cat; state.subtype = ''; state.filter = 'all';
+        try { localStorage.setItem('tmc.tab', state.category); } catch { /* storage blocked */ }
+        render();
+        return;
+      }
       const f = e.target.closest('[data-filter]');
       if (f) { state.filter = f.dataset.filter; render(); return; }
       const th = e.target.closest('th[data-sort]');
@@ -734,7 +841,9 @@
     $('#editForm').addEventListener('submit', submitEdit);
     $('#rescanBtn').addEventListener('click', rescan);
     ['effectiveDate', 'tenure'].forEach((k) => $(`#editForm [name=${k}]`).addEventListener('input', recalcEnd));
-    $('#editForm [name=endDate]').addEventListener('input', () => { state.autoEnd = false; $('#endHint').textContent = ''; });
+    $('#editForm [name=endDate]').addEventListener('input', () => { state.autoEnd = false; state.dueSuggested = false; $('#endHint').textContent = ''; });
+    $$('#editForm input[name=category]').forEach((r) => r.addEventListener('change', () => { setCategory(r.value, ''); recalcEnd(); }));
+    $('#subFilter').addEventListener('change', (e) => { state.subtype = e.target.value; render(); });
 
     // keep it live: refresh when you come back to the tab and every 2 minutes
     document.addEventListener('visibilitychange', () => { if (!document.hidden) reload(true); });

@@ -71,13 +71,15 @@
 
     <!-- Dashboard -->
     <section id="dashView" hidden>
+      <nav class="cat-tabs" id="catTabs" role="tablist" aria-label="Category"></nav>
       <div class="kpis" id="kpis"></div>
 
       <div class="grid">
         <section class="card contracts">
           <div class="card-head">
-            <h2>Contracts</h2>
+            <h2 id="listTitle">Contracts</h2>
             <div class="tools">
+              <select id="subFilter" aria-label="Filter by type"></select>
               <input type="search" id="search" placeholder="Search contracts…" aria-label="Search contracts">
               <button class="btn ghost sm" id="exportBtn" title="Download as CSV">Export CSV</button>
             </div>
@@ -87,10 +89,10 @@
             <table class="table" id="contractTable">
               <thead>
                 <tr>
-                  <th data-sort="title">Contract</th>
-                  <th data-sort="counterparty" class="hide-md">Counterparty</th>
-                  <th data-sort="endDate">Closing date</th>
-                  <th class="hide-sm">Tenure elapsed</th>
+                  <th data-sort="title" id="thName">Contract</th>
+                  <th data-sort="counterparty" class="hide-md" id="thParty">Counterparty</th>
+                  <th data-sort="endDate" id="thEnd">Closing / due date</th>
+                  <th class="hide-sm">Tenure / period</th>
                   <th data-sort="status">Status</th>
                   <th data-sort="next" class="hide-md">Next milestone</th>
                 </tr>
@@ -133,7 +135,7 @@
   <dialog id="editDialog" class="modal">
     <form method="dialog" id="editForm" class="form">
       <div class="modal-head">
-        <h2 id="editTitle">Upload contract</h2>
+        <h2 id="editTitle">Upload contract or document</h2>
         <button type="button" class="icon-btn" data-close aria-label="Close">✕</button>
       </div>
 
@@ -152,20 +154,33 @@
             Re-read facts from document
           </button>
         </div>
+        <fieldset class="cat-pick">
+          <legend>Category</legend>
+          <div class="seg" role="radiogroup" aria-label="Category">
+            <label><input type="radio" name="category" value="b2b"><span>B2B</span></label>
+            <label><input type="radio" name="category" value="rtd"><span>RTD</span></label>
+            <label><input type="radio" name="category" value="compliance"><span>Compliance</span></label>
+          </div>
+          <label class="sub-pick"><span data-c="Contract with" data-k="Document type">Contract with</span><select name="subtype"></select></label>
+          <span class="hint" id="catHint"></span>
+        </fieldset>
         <div class="field-grid">
-          <label class="span-2">Contract name<input name="title" required></label>
-          <label>Counterparty<input name="counterparty"></label>
-          <label>Contract type<input name="type" list="typeList" placeholder="e.g. Services, Lease, NDA"></label>
-          <label class="span-2">Parties<input name="parties"></label>
-          <label>Start / effective date<input name="effectiveDate" type="date"></label>
-          <label>Closing / end date<input name="endDate" type="date"><span class="hint" id="endHint"></span></label>
-          <label>Tenure<input name="tenure" placeholder="e.g. 2 years"><span class="hint">Closing date is calculated from start date + tenure</span></label>
-          <label>Contract value<input name="value" placeholder="e.g. ₹12,00,000"><span class="hint">Total value, if the contract states one</span></label>
-          <label>Notice period (days)<input name="noticeDays" type="number" min="0" step="1"></label>
+          <label class="span-2"><span data-c="Contract name" data-k="Document name">Contract name</span><input name="title" required></label>
+          <label><span data-c="Counterparty" data-k="Authority / department">Counterparty</span><input name="counterparty"></label>
+          <label class="c-only">Agreement type<input name="type" list="typeList" placeholder="e.g. Services, NDA, MoU"></label>
+          <label class="k-only">Period<input name="period" placeholder="e.g. Sep 2026, Q2 FY 2026-27, FY 2025-26"></label>
+          <label class="span-2 c-only">Parties<input name="parties"></label>
+          <label class="k-only">Reference no.<input name="reference" placeholder="ARN / SRN / acknowledgement no."></label>
+          <label class="k-only">Registration IDs<input name="ids" placeholder="GSTIN / PAN / CIN / TAN"></label>
+          <label><span data-c="Start / effective date" data-k="Filed / issue date">Start / effective date</span><input name="effectiveDate" type="date"></label>
+          <label><span data-c="Closing / end date" data-k="Next due date / valid until">Closing / end date</span><input name="endDate" type="date"><span class="hint" id="endHint"></span></label>
+          <label class="c-only">Tenure<input name="tenure" placeholder="e.g. 2 years"><span class="hint">Closing date is calculated from start date + tenure</span></label>
+          <label><span data-c="Contract value" data-k="Amount paid (tax / fee)">Contract value</span><input name="value" placeholder="e.g. ₹12,00,000"><span class="hint c-only">Total value, if the contract states one</span></label>
+          <label class="c-only">Notice period (days)<input name="noticeDays" type="number" min="0" step="1"></label>
           <label>Owner at TMC<input name="owner" placeholder="Who manages it"></label>
-          <label>Governing law<input name="governingLaw"></label>
-          <label class="span-2">Fees &amp; payment terms<textarea name="fees" rows="2" placeholder="e.g. ₹20,000 per candidate, payable on arrival"></textarea></label>
-          <label class="span-2">Renewal terms<textarea name="renewal" rows="2"></textarea></label>
+          <label class="c-only">Governing law<input name="governingLaw"></label>
+          <label class="span-2 c-only">Fees &amp; payment terms<textarea name="fees" rows="2" placeholder="e.g. ₹20,000 per candidate, payable on arrival"></textarea></label>
+          <label class="span-2 c-only">Renewal terms<textarea name="renewal" rows="2"></textarea></label>
           <label class="span-2">Notes<textarea name="notes" rows="2"></textarea></label>
         </div>
         <datalist id="typeList">
@@ -184,7 +199,7 @@
       <p class="error" id="editError" hidden></p>
       <div class="modal-foot">
         <button type="button" class="btn ghost" data-close>Cancel</button>
-        <button type="submit" class="btn primary" id="saveBtn" disabled>Save contract</button>
+        <button type="submit" class="btn primary" id="saveBtn" disabled>Save</button>
       </div>
     </form>
   </dialog>

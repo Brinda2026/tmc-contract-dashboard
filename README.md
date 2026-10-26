@@ -5,6 +5,21 @@ A live dashboard for tracking TMC contracts: upload a contract and it reads the 
 dated milestones), which you check and save. It then shows every contract's status, how much of its
 tenure has passed and what deadlines are coming up.
 
+## Categories
+
+Every item belongs to one of three categories, each with its own tab:
+
+| Category | Sub-types |
+|---|---|
+| **B2B** | Client · Consultant / Teacher · Vendor |
+| **RTD** | Client · Sourcing partner |
+| **Compliance** | GST · Income tax / TDS · ROC / MCA · Licence / registration · Other |
+
+The category and sub-type are suggested from the document's wording when it is uploaded. Compliance
+documents use their own fields (period, reference no. such as ARN / SRN, GSTIN / PAN / CIN, filed
+date, next due date, amount paid) and show "Due soon" / "Overdue" instead of contract statuses. For
+monthly GSTR-3B and GSTR-1 returns the next due date (20th / 11th) is suggested from the return period.
+
 ## How it is put together
 
 | Piece | Where it lives | Who can see it |

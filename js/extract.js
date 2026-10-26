@@ -160,12 +160,16 @@
       if (!n) continue;
       const before = text.slice(Math.max(0, m.index - 160), m.index);
       const after = text.slice(m.index + m[0].length, m.index + m[0].length + 80);
-      const near = before.slice(-90) + ' ' + m[0] + ' ' + after;
+      // judge a duration only by its own sentence
+      const cut = Math.max(before.lastIndexOf('. '), before.lastIndexOf('\n'), before.lastIndexOf('; '));
+      const own = before.slice(cut + 1);
+      const afterOwn = after.split(/\.\s|\n|;/)[0];
+      const near = own + ' ' + m[0] + ' ' + afterOwn;
       let score = 0;
-      if (/\b(validity|valid\s+for|term\s+of|tenure|duration\s+of\s+(?:this|the)|shall\s+(?:remain|continue)\s+in\s+(?:full\s+)?(?:force|effect)|continue\s+for|for\s+a\s+(?:period|term)\s+of|period\s+of)\b/i.test(before.slice(-90))) score += 5;
+      if (/\b(validity|valid\s+for|term\s+of|tenure|duration\s+of\s+(?:this|the)|shall\s+(?:remain|continue)\s+in\s+(?:full\s+)?(?:force|effect)|continue\s+for|for\s+a\s+(?:period|term)\s+of|period\s+of)\b/i.test(own) || /\b(?:term|tenure|duration|validity)\s*[:\-]\s*$/i.test(own)) score += 5;
       if (/(?:^|\n)\s*(?:\d+\.\s*)?(?:TERM|Term|TENURE|Tenure|DURATION|Duration|VALIDITY|Validity)(?:\s+(?:AND|and)\s+\w+)?\s*[:.]?\s*\n/.test(before)) score += 4;
       if (/\b(agreement|contract|mou)\b/i.test(near)) score += 2;
-      if (/\b(from\s+the\s+(?:date|effective)|commencement|date\s+of\s+(?:signing|execution))\b/i.test(after)) score += 2;
+      if (/\b(from\s+the\s+(?:date|effective)|commencement|date\s+of\s+(?:signing|execution))\b/i.test(afterOwn)) score += 2;
       if (/\b(insurance|confidential|after\s+(?:the\s+)?(?:termination|expiry|expiration)|surviv|warrant|notice|interest|invoice|within|probation|training|stay|visa|salary|leave)\b/i.test(near)) score -= 8;
       if (score >= 4 && (!best || score > best.score)) {
         const unit = m[2].toLowerCase();
@@ -230,7 +234,7 @@
 
   // ---------- parties ----------
 
-  const OUR_COMPANY = /\b(TMC|The\s+Migration\s+Company|Edmove)\b/i;
+  const OUR_COMPANY = /\b(TMC|(?:The\s+)?Migration\s+Company|Edmove)\b/i;
   const CO_SUFFIX = '(?:Private\\s+Limited|Pvt\\.?\\s*Ltd\\.?|Limited|LLP|Ltd\\.?|Inc\\.?|LLC|GmbH|Corporation|Corp\\.)';
   const NAME_RE = new RegExp(`((?:[A-Z][\\w&.'’-]*)(?:[ \\t]+(?:[A-Z][\\w&.'’-]*|and|of|&|for)){0,8}[ \\t]+${CO_SUFFIX})`, 'g');
   const NOT_NAME = /^(?:the|m\/s\.?|and|between|by|partner|party|first|second|client|company|vendor|a|an|this|agreement)\s+/i;
@@ -253,9 +257,14 @@
       const inAddress = /(?:office|address|situated|located|residing)\s+(?:is\s+)?(?:at|in)\s*:?\s*$/i.test(head.slice(Math.max(0, m.index - 40), m.index));
       const firstWords = m[1].split(/\s+/).slice(0, 2).join(' ');
       if (inAddress && head.split(firstWords).length < 3) continue;
-      // "X Pvt Ltd and Y Pvt Ltd" in one run of capitals is two parties
-      const pieces = m[1].split(new RegExp(`(?<=${CO_SUFFIX})\\s+and\\s+`));
-      for (const piece of pieces) addName(piece);
+      // "X Pvt Ltd and Y Pvt Ltd" / "The Migration Company and Y Ltd" in one run of capitals is two parties,
+      // but "Edmove Smarter Migration and Skilling Solutions Private Limited" is one
+      let cur = '';
+      for (const piece of m[1].split(/\s+and\s+/)) {
+        cur = cur ? `${cur} and ${piece}` : piece;
+        if (new RegExp(`${CO_SUFFIX}$`).test(cur) || /\bmigration\s+company$/i.test(cur)) { addName(cur); cur = ''; }
+      }
+      if (cur) addName(cur);
     }
     function addName(raw) {
       const n = cleanParty(raw);
@@ -285,12 +294,27 @@
     return [p1, p2].filter((p) => p.length > 2 && !/^(?:partner|party|parties)\b/i.test(p));
   }
 
+  // Individuals (a freelance teacher, a consultant) are named with a title rather than a company suffix.
+  function findPeople(text) {
+    const end = text.search(/\b(?:WHEREAS|Whereas|INTRODUCTION|RECITALS|NOW,?\s+THEREFORE|1\.\s+[A-Z])/);
+    const head = text.slice(0, end > 200 ? Math.min(end, 4000) : 2500);
+    const out = [];
+    const re = /\b(?:Mr|Ms|Mrs|Miss|Dr|Shri|Smt|Kumari)\.?\s+([A-Z][a-z]+(?:\s+[A-Z][a-z]+){0,3})/g;
+    let m;
+    while ((m = re.exec(head))) if (!out.includes(m[1])) out.push(m[1]);
+    return out.slice(0, 2);
+  }
+
   function findParties(text) {
-    const byName = findPartiesByName(text);
-    if (byName.length >= 2) return byName.slice(0, 3);
-    const between = findPartiesBetween(text);
-    const all = [...byName];
-    for (const p of between) if (!all.some((x) => x.toLowerCase().startsWith(p.toLowerCase().slice(0, 12)))) all.push(p);
+    const all = [...findPartiesByName(text)];
+    for (const p of findPeople(text)) all.push(p);
+    if (all.length < 2) {
+      const lower = all.map((x) => x.toLowerCase());
+      for (const p of findPartiesBetween(text)) {
+        const q = p.toLowerCase();
+        if (!lower.some((x) => x.includes(q) || q.includes(x))) { all.push(p); lower.push(q); }
+      }
+    }
     return all.slice(0, 3);
   }
 
@@ -335,6 +359,104 @@
     return '';
   }
 
+  // ---------- category: B2B / RTD / Compliance ----------
+
+  const count = (re, s) => (s.match(re) || []).length;
+  const COMPLIANCE_KINDS = [
+    ['GST', /\bGSTR[- ]?(?:1|3B|4|9C?|2[AB])\b|Goods\s+and\s+Services\s+Tax|\bGSTIN\b|\bGST\s+REG-?\d+|\bGSTN\b/gi],
+    ['Income tax / TDS', /\bITR[- ]?V?\d?\b|Income[- ]tax\s+(?:Department|Return)|Assessment\s+Year|Form\s*(?:No\.?\s*)?(?:16A?|26AS|2[467]Q|24G)\b|\bTDS\b|\bTAN\b|ITNS\s*\d+/gi],
+    ['ROC / MCA', /Ministry\s+of\s+Corporate\s+Affairs|Registrar\s+of\s+Companies|\bMCA\b|\bROC\b|Form\s*(?:No\.?\s*)?(?:AOC-?4|MGT-?7A?|DIR-?3|DPT-?3|ADT-?1|INC-?\d+|PAS-?3|MSME-?1|CHG-?\d)|\bSRN\b|Certificate\s+of\s+Incorporation/gi],
+    ['Licence / registration', /Registration\s+Certificate|Shops?\s+and\s+Establishments?|Udyam\s+Registration|Import\s+Export\s+Code|\bIEC\b|Trade\s+Licen[cs]e|Professional\s+Tax|\bEPFO?\b|\bESIC?\b|Recruiting\s+Agent\s+Licen[cs]e/gi],
+  ];
+  const CONTRACT_TITLE = /\b(agreement|contract|memorandum|mou|nda|addendum|amendment|letter\s+of\s+(?:intent|engagement)|engagement\s+letter|purchase\s+order|work\s+order|statement\s+of\s+work)\b/i;
+
+  function classify(text, title) {
+    const head = text.slice(0, 8000);
+    const kinds = COMPLIANCE_KINDS.map(([k, re]) => [k, count(re, head)]).sort((a, b) => b[1] - a[1]);
+    const legal = count(/\b(whereas|hereinafter|in\s+witness\s+whereof|the\s+parties\s+agree|this\s+agreement)\b/gi, head);
+    if (!CONTRACT_TITLE.test(title) && kinds[0][1] >= 2 && legal < 2) {
+      return { category: 'compliance', subtype: kinds[0][0] };
+    }
+    const all = (title + ' ' + head).toLowerCase();
+    const teacher = count(/\b(teacher|trainer|tutor|faculty|instructor|language\s+coach|consultant|consultancy|freelance)/g, all);
+    const vendor = count(/\b(vendor|supplier|purchase\s+order|work\s+order|service\s+provider|subscription|software|licen[cs]e\s+fee|rent|lease|landlord|printing|agency\s+fee|hosting|maintenance)\b/g, all);
+    const rtd = count(/\b(nurs(?:e|es|ing)|healthcare\s+professional|candidates?|placement|deploy\w*|overseas\s+employer|germany|german\s+language|b2\s+level|visa|recogni[sz]ation|anerkennung|mobili[sz]\w*|skilling|recruit\w*|emigration)\b/g, all);
+    const b2bClient = count(/\b(university|college|institute|school|academy|corporate\s+training|training\s+programme|batch(?:es)?\s+of\s+students|students)\b/g, all);
+    if (rtd >= 4 && rtd > teacher * 3 && rtd > vendor * 2) {
+      const sourcing = count(/\b(sourcing|source\s+candidates|channel\s+partner|mobili[sz]\w*|referral|refer\s+candidates|associate\s+partner|partner\s+agreement|sub-?agent)\b/g, all);
+      const client = count(/\b(employer|hospital|klinik|clinic|care\s+home|nursing\s+home|pflege|gmbh|ag\b|e\.v\.)/g, all);
+      return { category: 'rtd', subtype: sourcing >= client ? 'Sourcing partner' : 'Client' };
+    }
+    if (teacher >= 2 && teacher >= vendor) return { category: 'b2b', subtype: 'Consultant / Teacher' };
+    if (vendor >= 2 && vendor > b2bClient) return { category: 'b2b', subtype: 'Vendor' };
+    if (b2bClient || vendor || teacher) return { category: 'b2b', subtype: b2bClient >= vendor ? 'Client' : 'Vendor' };
+    return { category: '', subtype: '' };
+  }
+
+  // ---------- compliance document facts ----------
+
+  const AUTHORITY = { GST: 'GST Department (GSTN)', 'Income tax / TDS': 'Income Tax Department', 'ROC / MCA': 'Ministry of Corporate Affairs (ROC)' };
+  const MONTH_NAMES = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
+
+  function analyzeCompliance(text, flat, subtype, fmt) {
+    const one = (re) => { const m = flat.match(re); return m ? m[1].replace(/\s+/g, ' ').trim() : ''; };
+    const ids = [];
+    const gstin = flat.match(/\b\d{2}[A-Z]{5}\d{4}[A-Z][1-9A-Z]Z[0-9A-Z]\b/);
+    if (gstin) ids.push('GSTIN ' + gstin[0]);
+    const cin = flat.match(/\b[LU]\d{5}[A-Z]{2}\d{4}(?:PTC|PLC|OPC|NPL|GOI|SGC|FTC|ULL|ULT)\d{6}\b/);
+    if (cin) ids.push('CIN ' + cin[0]);
+    const pan = (flat.replace(/\b\d{2}[A-Z]{5}\d{4}[A-Z][1-9A-Z]Z[0-9A-Z]\b/g, '').match(/\bPAN\b[^A-Z]{0,20}([A-Z]{5}\d{4}[A-Z])\b/) || flat.match(/\b([A-Z]{3}[CPHFATBLJG][A-Z]\d{4}[A-Z])\b/));
+    if (pan) ids.push('PAN ' + pan[1]);
+    const tan = flat.match(/\bTAN\b[^A-Z]{0,20}([A-Z]{4}\d{5}[A-Z])\b/);
+    if (tan) ids.push('TAN ' + tan[1]);
+
+    const reference =
+      one(/\bARN\b\s*(?:No\.?|Number)?\s*[:.\-]?\s*([A-Z]{2}\d{6,}[A-Z0-9]*)/) ||
+      one(/\bSRN\b\s*(?:No\.?|Number)?\s*[:.\-]?\s*([A-Z]{1,2}\d{7,}[A-Z0-9]*)/) ||
+      one(/Acknowledg(?:e)?ment\s+(?:No|Number)\.?\s*[:.\-]?\s*(\d{9,20})/i) ||
+      one(/(?:Token|Receipt|Registration|Certificate|Challan)\s+(?:No|Number)\.?\s*[:.\-]?\s*([A-Z0-9\/-]{6,25})/i);
+
+    const form = one(/\b(GSTR[- ]?(?:1|3B|4|9C?)|ITR[- ]?\d|Form\s*(?:No\.?\s*)?(?:AOC-?4|MGT-?7A?|DIR-?3|DPT-?3|ADT-?1|INC-?\d+|PAS-?3|MSME-?1|2[467]Q|16A?|26AS))\b/i).replace(/\s+/g, ' ');
+    const month = one(/(?:Tax|Return)\s+Period\s*[:\-]?\s*((?:January|February|March|April|May|June|July|August|September|October|November|December)(?:\s*[-,]?\s*20\d{2})?)/i);
+    const yr = one(/(?:Financial\s+Year|F\.Y\.)\s*[:\-]?\s*(20\d{2}\s*[-–]\s*(?:20)?\d{2})/i);
+    const ay = one(/(?:Assessment\s+Year|A\.Y\.)\s*[:\-]?\s*(20\d{2}\s*[-–]\s*(?:20)?\d{2})/i);
+    const quarter = one(/\b(Q[1-4])\b/);
+    const periodFull = month ? (yr && !/20\d{2}/.test(month) ? `${month} (FY ${yr})` : month)
+      : quarter && yr ? `${quarter} FY ${yr}` : ay ? `AY ${ay}` : yr ? `FY ${yr}` : '';
+
+    const dates = findDates(flat, fmt);
+    const near = (re) => {
+      const d = dates.find((x) => re.test(flat.slice(Math.max(0, x.index - 70), x.index)));
+      return d ? d.date : '';
+    };
+    const filed = near(/(date\s+of\s+(?:filing|submission|arn|upload|registration|incorporation|issue|payment)|filed\s+on|filing\s+date|submitted\s+on|issued\s+on|date\s*[:\-]?\s*$)/i);
+    let due = near(/(due\s+date|valid\s+(?:up\s*to|till|until|from\s+\S+\s+to)|validity|expiry\s+date|expires\s+on|next\s+due|renewal\s+date)/i);
+
+    // Monthly GST returns: suggest the next return's due date (GSTR-3B → 20th, GSTR-1 → 11th)
+    let dueSuggested = false;
+    const mon = MONTH_NAMES.findIndex((m) => new RegExp('^' + m, 'i').test(month));
+    const gstForm = /GSTR[- ]?(3B|1)\b/i.exec(form);
+    if (!due && gstForm && mon >= 0) {
+      const fyStart = yr ? parseInt(yr, 10) : null;
+      const inMonth = month.match(/20\d{2}/);
+      const year = inMonth ? +inMonth[0] : fyStart ? (mon >= 3 ? fyStart : fyStart + 1) : (filed ? parseInt(filed, 10) : new Date().getFullYear());
+      const d = new Date(year, mon + 2, gstForm[1].toUpperCase() === '3B' ? 20 : 11);
+      due = `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
+      dueSuggested = true;
+    }
+
+    const amtM = flat.match(/(?:Total\s+(?:tax\s+)?(?:paid|payable|amount(?:\s+paid)?)|Amount\s+(?:paid|deposited)|Tax\s+paid|Fee(?:s)?\s+paid|Total\s+fee)[^\d₹\n]{0,40}((?:₹|Rs\.?|INR)?\s?\d[\d,]*(?:\.\d{1,2})?)/i);
+    const value = amtM ? (/^\s*(?:₹|Rs|INR)/i.test(amtM[1]) ? amtM[1].trim() : '₹' + amtM[1].trim()) : '';
+
+    const docName = { GST: 'GST', 'Income tax / TDS': 'Income tax', 'ROC / MCA': 'ROC filing', 'Licence / registration': 'Registration' }[subtype] || 'Compliance';
+    const title = [form ? `${docName === 'GST' ? 'GST return' : docName} – ${form.toUpperCase().replace(/^FORM\s*(?:NO\.?\s*)?/, 'Form ')}` : '', periodFull].filter(Boolean).join(' · ');
+    return {
+      title, period: periodFull, reference, ids: ids.join(' · '),
+      counterparty: AUTHORITY[subtype] || '',
+      effectiveDate: filed, endDate: due, dueSuggested, value,
+    };
+  }
+
   // ---------- put it together ----------
 
   function analyze(text, filename, fmt) {
@@ -369,7 +491,22 @@
     const money = findMoney(flat);
     const title = findTitle(text, filename);
     const head = text.slice(0, 2500);
+    const cat = classify(text, title);
+    if (cat.category === 'compliance') {
+      const k = analyzeCompliance(text, flat, cat.subtype, fmt);
+      return {
+        ...cat, ...k,
+        title: k.title || title,
+        type: '', parties: '', tenure: '', noticeDays: '', renewal: '', governingLaw: '', fees: '',
+        endCalculated: false,
+        milestones: milestones.filter((m) => m.date !== k.effectiveDate && m.date !== k.endDate),
+        datesBlank: false,
+        textFound: text.trim().length > 50,
+      };
+    }
     return {
+      ...cat,
+      period: '', reference: '', ids: '',
       title,
       type: findType(title, text),
       parties: parties.join(' ⟷ '),
@@ -389,5 +526,5 @@
     };
   }
 
-  window.ContractExtract = { readText, analyze, addTerm, parseTenure };
+  window.ContractExtract = { readText, analyze, addTerm, parseTenure, classify };
 })();
