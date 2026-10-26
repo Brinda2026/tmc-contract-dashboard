@@ -1,0 +1,219 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>TMC Contract Dashboard</title>
+  <meta name="description" content="Live tracker for TMC contracts: tenure, closing dates and upcoming milestones.">
+  <meta name="robots" content="noindex">
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='7' fill='%232a78d6'/%3E%3Cpath d='M10 8h9l5 5v11a2 2 0 0 1-2 2H10a2 2 0 0 1-2-2V10a2 2 0 0 1 2-2z' fill='%23fff'/%3E%3Cpath d='M12 16h8M12 20h6' stroke='%232a78d6' stroke-width='2' stroke-linecap='round'/%3E%3C/svg%3E">
+  <link rel="stylesheet" href="css/styles.css">
+</head>
+<body>
+  <header class="topbar">
+    <div class="brand">
+      <span class="logo" aria-hidden="true">
+        <svg viewBox="0 0 24 24" width="20" height="20"><path d="M7 3h7l5 5v11a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2z" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/><path d="M14 3v5h5M9 13h6M9 17h4" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>
+      </span>
+      <div>
+        <h1>TMC Contract Dashboard</h1>
+        <p class="sync" id="syncStatus">Not connected</p>
+      </div>
+    </div>
+    <div class="actions">
+      <button class="btn ghost" id="refreshBtn" title="Reload from GitHub" hidden>
+        <svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true"><path d="M20 11a8 8 0 1 0-2.3 5.7M20 4v7h-7" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+        <span class="hide-sm">Refresh</span>
+      </button>
+      <button class="btn ghost" id="settingsBtn" title="Settings">
+        <svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true"><circle cx="12" cy="12" r="3" fill="none" stroke="currentColor" stroke-width="2"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z" fill="none" stroke="currentColor" stroke-width="1.6"/></svg>
+        <span class="hide-sm">Settings</span>
+      </button>
+      <button class="btn primary" id="uploadBtn" hidden>
+        <svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true"><path d="M12 16V4M6 10l6-6 6 6M4 20h16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+        Upload<span class="hide-sm" style="margin-left:-2px">contract</span>
+      </button>
+    </div>
+  </header>
+
+  <main id="app">
+    <!-- Connect screen -->
+    <section id="connectView" class="connect" hidden>
+      <div class="card connect-card">
+        <h2>Connect your contract storage</h2>
+        <p class="muted">Contracts are saved in a <strong>private</strong> GitHub repository that only you (and people you invite) can see. Connect it once on each device.</p>
+        <form id="connectForm" class="form">
+          <label>GitHub username or organisation
+            <input name="owner" required autocomplete="username" placeholder="e.g. Brinda2026">
+          </label>
+          <label>Private data repository name
+            <input name="repo" required value="tmc-contracts-data">
+          </label>
+          <label>Access token
+            <input name="token" type="password" required autocomplete="off" placeholder="github_pat_…">
+            <span class="hint">A fine-grained token with <em>Contents: Read and write</em> on the data repository only. It is stored in this browser and sent only to GitHub.</span>
+          </label>
+          <p class="error" id="connectError" hidden></p>
+          <button class="btn primary" type="submit">Connect</button>
+        </form>
+        <details class="help">
+          <summary>How do I get an access token?</summary>
+          <ol>
+            <li>Open <a href="https://github.com/settings/personal-access-tokens/new" target="_blank" rel="noopener">github.com/settings/personal-access-tokens/new</a>.</li>
+            <li>Name it <em>TMC dashboard</em> and pick an expiry (e.g. 1 year).</li>
+            <li>Under <em>Repository access</em>, choose <em>Only select repositories</em> and select <em>tmc-contracts-data</em>.</li>
+            <li>Under <em>Permissions → Repository permissions</em>, set <em>Contents</em> to <em>Read and write</em>.</li>
+            <li>Click <em>Generate token</em>, copy it and paste it above.</li>
+          </ol>
+        </details>
+      </div>
+    </section>
+
+    <!-- Dashboard -->
+    <section id="dashView" hidden>
+      <div class="kpis" id="kpis"></div>
+
+      <div class="grid">
+        <section class="card contracts">
+          <div class="card-head">
+            <h2>Contracts</h2>
+            <div class="tools">
+              <input type="search" id="search" placeholder="Search contracts…" aria-label="Search contracts">
+              <button class="btn ghost sm" id="exportBtn" title="Download as CSV">Export CSV</button>
+            </div>
+          </div>
+          <div class="chips" id="filters" role="tablist" aria-label="Filter by status"></div>
+          <div class="table-wrap">
+            <table class="table" id="contractTable">
+              <thead>
+                <tr>
+                  <th data-sort="title">Contract</th>
+                  <th data-sort="counterparty" class="hide-md">Counterparty</th>
+                  <th data-sort="endDate">Closing date</th>
+                  <th class="hide-sm">Tenure elapsed</th>
+                  <th data-sort="status">Status</th>
+                  <th data-sort="next" class="hide-md">Next milestone</th>
+                </tr>
+              </thead>
+              <tbody></tbody>
+            </table>
+          </div>
+          <div class="empty" id="emptyState" hidden>
+            <p><strong>No contracts yet.</strong></p>
+            <p class="muted">Upload a PDF, Word (.docx) or text file. Key dates and terms are filled in for you to check.</p>
+            <button class="btn primary" id="emptyUpload">Upload your first contract</button>
+          </div>
+        </section>
+
+        <aside class="card upcoming">
+          <div class="card-head">
+            <h2>Upcoming deadlines</h2>
+            <select id="horizon" aria-label="Time window">
+              <option value="30">Next 30 days</option>
+              <option value="90" selected>Next 90 days</option>
+              <option value="180">Next 6 months</option>
+              <option value="365">Next 12 months</option>
+            </select>
+          </div>
+          <ol class="timeline" id="timeline"></ol>
+        </aside>
+      </div>
+    </section>
+
+    <div class="loading" id="loading" hidden><span class="spinner"></span><span id="loadingText">Loading…</span></div>
+  </main>
+
+  <!-- Contract detail drawer -->
+  <div class="scrim" id="drawerScrim" hidden></div>
+  <aside class="drawer" id="drawer" aria-hidden="true" aria-labelledby="drawerTitle" role="dialog">
+    <div class="drawer-inner" id="drawerBody"></div>
+  </aside>
+
+  <!-- Upload / edit dialog -->
+  <dialog id="editDialog" class="modal">
+    <form method="dialog" id="editForm" class="form">
+      <div class="modal-head">
+        <h2 id="editTitle">Upload contract</h2>
+        <button type="button" class="icon-btn" data-close aria-label="Close">✕</button>
+      </div>
+
+      <div id="dropZone" class="dropzone">
+        <input type="file" id="fileInput" accept=".pdf,.docx,.txt,.md,application/pdf,application/vnd.openxmlformats-officedocument.wordprocessingml.document,text/plain">
+        <svg viewBox="0 0 24 24" width="28" height="28" aria-hidden="true"><path d="M12 16V4M6 10l6-6 6 6M4 20h16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>
+        <p><strong>Drop a contract here</strong> or click to choose</p>
+        <p class="hint">PDF, Word (.docx) or text · scanned image-only PDFs can be uploaded but facts must be typed in</p>
+      </div>
+      <p class="notice" id="extractNotice" hidden></p>
+
+      <div id="factFields" hidden>
+        <div class="field-grid">
+          <label class="span-2">Contract name<input name="title" required></label>
+          <label>Counterparty<input name="counterparty"></label>
+          <label>Contract type<input name="type" list="typeList" placeholder="e.g. Services, Lease, NDA"></label>
+          <label class="span-2">Parties<input name="parties"></label>
+          <label>Start / effective date<input name="effectiveDate" type="date"></label>
+          <label>Closing / end date<input name="endDate" type="date"><span class="hint" id="endHint"></span></label>
+          <label>Tenure<input name="tenure" placeholder="e.g. 3 years"></label>
+          <label>Contract value<input name="value" placeholder="e.g. ₹12,00,000"></label>
+          <label>Notice period (days)<input name="noticeDays" type="number" min="0" step="1"></label>
+          <label>Owner at TMC<input name="owner" placeholder="Who manages it"></label>
+          <label>Governing law<input name="governingLaw"></label>
+          <label class="span-2">Renewal terms<textarea name="renewal" rows="2"></textarea></label>
+          <label class="span-2">Notes<textarea name="notes" rows="2"></textarea></label>
+        </div>
+        <datalist id="typeList">
+          <option>Services</option><option>MSA</option><option>SOW</option><option>NDA</option><option>Lease</option>
+          <option>Vendor</option><option>Supply</option><option>License</option><option>Consulting</option><option>Employment</option><option>MoU</option>
+        </datalist>
+
+        <div class="ms-head">
+          <h3>Milestones</h3>
+          <button type="button" class="btn ghost sm" id="addMsBtn">+ Add milestone</button>
+        </div>
+        <p class="hint" id="msHint">Dates found in the document are listed below. Tick the ones to track.</p>
+        <ul class="ms-edit" id="msEdit"></ul>
+      </div>
+
+      <p class="error" id="editError" hidden></p>
+      <div class="modal-foot">
+        <button type="button" class="btn ghost" data-close>Cancel</button>
+        <button type="submit" class="btn primary" id="saveBtn" disabled>Save contract</button>
+      </div>
+    </form>
+  </dialog>
+
+  <!-- Settings dialog -->
+  <dialog id="settingsDialog" class="modal small">
+    <form method="dialog" class="form" id="settingsForm">
+      <div class="modal-head">
+        <h2>Settings</h2>
+        <button type="button" class="icon-btn" data-close aria-label="Close">✕</button>
+      </div>
+      <p class="muted" id="settingsConn"></p>
+      <label>Flag contracts as “expiring soon” within
+        <select name="expiringDays">
+          <option value="30">30 days</option><option value="60">60 days</option><option value="90">90 days</option><option value="120">120 days</option><option value="180">180 days</option>
+        </select>
+      </label>
+      <label>Numeric dates in contracts are written as
+        <select name="dateFormat">
+          <option value="DMY">DD/MM/YYYY (India, UK)</option>
+          <option value="MDY">MM/DD/YYYY (US)</option>
+        </select>
+      </label>
+      <div class="modal-foot split">
+        <button type="button" class="btn danger ghost" id="disconnectBtn">Disconnect this device</button>
+        <button type="submit" class="btn primary" value="save">Save</button>
+      </div>
+    </form>
+  </dialog>
+
+  <div class="toast" id="toast" role="status" aria-live="polite" hidden></div>
+
+  <script src="vendor/pdf.min.js"></script>
+  <script src="vendor/mammoth.browser.min.js"></script>
+  <script src="js/store.js"></script>
+  <script src="js/extract.js"></script>
+  <script src="js/app.js"></script>
+</body>
+</html>
