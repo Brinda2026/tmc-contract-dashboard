@@ -647,6 +647,10 @@
       return url;
     } catch (e) {
       const workspace = /\/a\/macros\//.test(url);
+      if (/permission to perform that action|auth\/calendar|authoriz/i.test(e.message)) {
+        calMsg('The script runs, but your Google account has not allowed it to use Calendar yet. In the script editor choose the function "authorize" (or "doGet") in the toolbar, click ▷ Run, then Review permissions → your account → Advanced → Go to … (unsafe) → Allow. No need to redeploy; click Test connection again afterwards.', 'warn');
+        return null;
+      }
       if (/wrong key/i.test(e.message)) {
         calMsg('The script is reachable, but its key does not match this dashboard. Click "Copy script" above, replace ALL the code in the script editor with it and save. Then open Deploy → Manage deployments → ✏️ Edit, choose Version: "New version" and click Deploy (the URL stays the same). Then click Test connection again.', 'warn');
         return null;

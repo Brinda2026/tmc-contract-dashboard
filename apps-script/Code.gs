@@ -6,11 +6,18 @@
  * dates; this script only creates, updates or removes the events it made.
  *
  * Setup: paste this whole file into a new project at https://script.google.com,
+ * run the "authorize" function once and allow Calendar access,
  * then Deploy → New deployment → Web app, "Execute as: Me", "Who has access: Anyone".
  * Copy the web app URL into the dashboard (Settings → Google Calendar).
  */
 
 const SECRET = '__SECRET__'; // the dashboard fills this in; keep it private
+
+// Run this once from the editor (▷ Run) so Google asks you to allow Calendar access.
+function authorize() {
+  const cal = CalendarApp.getDefaultCalendar();
+  Logger.log('Calendar access OK: ' + cal.getName());
+}
 
 function doGet() {
   return out({ ok: true, service: 'TMC calendar sync' });
