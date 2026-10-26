@@ -626,9 +626,14 @@
   }
 
   async function testCal() {
-    const url = $('#calForm').url.value.trim();
-    if (!/^https:\/\/script\.google\.com\/macros\/s\/[\w-]+\/exec$/.test(url)) {
-      calMsg('Paste the Web app URL from step 4. It looks like https://script.google.com/macros/s/…/exec', 'warn');
+    const url = $('#calForm').url.value.trim().replace(/\?.*$/, '');
+    // personal accounts: script.google.com/macros/s/…/exec; Google Workspace: script.google.com/a/macros/<domain>/s/…/exec
+    if (/\/dev$/.test(url)) {
+      calMsg('This is the test (/dev) URL. Use the Web app URL from Deploy → Manage deployments, which ends in /exec.', 'warn');
+      return null;
+    }
+    if (!/^https:\/\/script\.google\.com\/(?:a\/macros\/[\w.-]+\/|macros\/)s\/[\w-]+\/exec$/.test(url)) {
+      calMsg('Paste the Web app URL from step 4. It looks like https://script.google.com/macros/s/…/exec (or …/a/macros/your-domain/s/…/exec)', 'warn');
       return null;
     }
     calMsg('Checking the connection…');
@@ -637,7 +642,10 @@
       calMsg(`Connected to the calendar “${r.calendar}”${r.account ? ' of ' + r.account : ''}.`, 'ok');
       return url;
     } catch (e) {
-      calMsg(e.message, 'warn');
+      const workspace = /\/a\/macros\//.test(url);
+      calMsg(workspace && /reach/.test(e.message)
+        ? 'Could not reach the Google script. In the script editor open Deploy → Manage deployments → Edit, and make sure "Who has access" is "Anyone" (not "Anyone within your organisation"), then click Deploy. If "Anyone" is not offered, your Google Workspace admin has turned it off; set the script up with a personal Gmail account instead.'
+        : e.message, 'warn');
       return null;
     }
   }
