@@ -601,7 +601,11 @@
   async function openCalDialog() {
     const f = $('#calForm');
     const cal = state.settings.calendar || {};
-    state.calKey = cal.key || Cal.newKey();
+    // keep the same key until set-up is saved, so a script copied earlier still matches
+    let draft = '';
+    try { draft = localStorage.getItem('tmc.calDraftKey') || ''; } catch { /* storage blocked */ }
+    state.calKey = cal.key || draft || Cal.newKey();
+    try { if (!cal.key) localStorage.setItem('tmc.calDraftKey', state.calKey); } catch { /* storage blocked */ }
     f.url.value = cal.url || '';
     f.leadDays.value = String(cal.leadDays ?? 30);
     f.alwaysInvite.value = cal.alwaysInvite || '';
@@ -643,6 +647,10 @@
       return url;
     } catch (e) {
       const workspace = /\/a\/macros\//.test(url);
+      if (/wrong key/i.test(e.message)) {
+        calMsg('The script is reachable, but its key does not match this dashboard. Click "Copy script" above, replace ALL the code in the script editor with it and save. Then open Deploy → Manage deployments → ✏️ Edit, choose Version: "New version" and click Deploy (the URL stays the same). Then click Test connection again.', 'warn');
+        return null;
+      }
       calMsg(workspace && /reach/.test(e.message)
         ? 'Could not reach the Google script. In the script editor open Deploy → Manage deployments → Edit, and make sure "Who has access" is "Anyone" (not "Anyone within your organisation"), then click Deploy. If "Anyone" is not offered, your Google Workspace admin has turned it off; set the script up with a personal Gmail account instead.'
         : e.message, 'warn');
