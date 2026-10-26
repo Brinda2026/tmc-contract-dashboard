@@ -73,6 +73,7 @@
     <section id="dashView" hidden>
       <nav class="cat-tabs" id="catTabs" role="tablist" aria-label="Category"></nav>
       <div class="kpis" id="kpis"></div>
+      <section class="overview" id="overview" aria-label="Overview by category" hidden></section>
 
       <div class="grid">
         <section class="card contracts">
@@ -178,6 +179,7 @@
           <label><span data-c="Contract value" data-k="Amount paid (tax / fee)">Contract value</span><input name="value" placeholder="e.g. ₹12,00,000"><span class="hint c-only">Total value, if the contract states one</span></label>
           <label class="c-only">Notice period (days)<input name="noticeDays" type="number" min="0" step="1"></label>
           <label>Owner at TMC<input name="owner" placeholder="Who manages it"></label>
+          <label>Owner email<input name="ownerEmail" type="email" multiple placeholder="name@themigrationcompany.com"><span class="hint">Invited to the due / renewal dates in Google Calendar</span></label>
           <label class="c-only">Governing law<input name="governingLaw"></label>
           <label class="span-2 c-only">Fees &amp; payment terms<textarea name="fees" rows="2" placeholder="e.g. ₹20,000 per candidate, payable on arrival"></textarea></label>
           <label class="span-2 c-only">Renewal terms<textarea name="renewal" rows="2"></textarea></label>
@@ -223,9 +225,51 @@
           <option value="MDY">MM/DD/YYYY (US)</option>
         </select>
       </label>
+      <div class="cal-box">
+        <h3>Google Calendar reminders</h3>
+        <p class="muted" id="calStatus">Not set up.</p>
+        <button type="button" class="btn ghost sm" id="calSetupBtn">Set up</button>
+      </div>
       <div class="modal-foot split">
         <button type="button" class="btn danger ghost" id="disconnectBtn">Disconnect this device</button>
         <button type="submit" class="btn primary" value="save">Save</button>
+      </div>
+    </form>
+  </dialog>
+
+  <!-- Google Calendar setup -->
+  <dialog id="calDialog" class="modal">
+    <form class="form" id="calForm">
+      <div class="modal-head">
+        <h2>Google Calendar reminders</h2>
+        <button type="button" class="icon-btn" data-close aria-label="Close">✕</button>
+      </div>
+      <p class="muted">Due, renewal and notice dates are added to <strong>your</strong> Google Calendar (the Google account you set this up with), and each item's <em>owner email</em> is invited, so they get it in their calendar and you can follow up. Set this up once; every device then uses it.</p>
+      <ol class="steps">
+        <li>Open <a href="https://script.google.com/home/projects/create" target="_blank" rel="noopener">script.google.com → New project</a>, signed in to the Google account whose calendar should hold the reminders.</li>
+        <li>Delete the sample code and paste this script:
+          <div class="script-row"><button type="button" class="btn ghost sm" id="copyScriptBtn">Copy script</button><span class="hint" id="copyMsg"></span></div>
+          <details><summary>Show script</summary><pre class="script" id="scriptText"></pre></details>
+          <span class="hint">It contains a private key that links it to this dashboard. Don't share it.</span>
+        </li>
+        <li>Click <em>Deploy → New deployment</em>, pick the type <em>Web app</em>, set <em>Execute as: Me</em> and <em>Who has access: Anyone</em>, then click <em>Deploy</em> and allow the Calendar permission Google asks for.</li>
+        <li>Copy the <em>Web app URL</em> and paste it here:
+          <input name="url" type="url" placeholder="https://script.google.com/macros/s/…/exec" autocomplete="off">
+        </li>
+      </ol>
+      <div class="field-grid">
+        <label>Heads-up before a renewal / notice / due date
+          <select name="leadDays"><option value="14">14 days</option><option value="30">30 days</option><option value="45">45 days</option><option value="60">60 days</option><option value="90">90 days</option></select>
+        </label>
+        <label>Also invite on every event (optional)<input name="alwaysInvite" placeholder="e.g. your email, legal@…"></label>
+      </div>
+      <p class="notice" id="calMsg" hidden></p>
+      <div class="modal-foot split">
+        <button type="button" class="btn danger ghost" id="calOffBtn">Turn off</button>
+        <span class="foot-right">
+          <button type="button" class="btn ghost" id="calTestBtn">Test connection</button>
+          <button type="submit" class="btn primary">Save &amp; add all dates</button>
+        </span>
       </div>
     </form>
   </dialog>
@@ -236,6 +280,7 @@
   <script src="vendor/mammoth.browser.min.js"></script>
   <script src="js/store.js"></script>
   <script src="js/extract.js"></script>
+  <script src="js/calendar.js"></script>
   <script src="js/app.js"></script>
 </body>
 </html>

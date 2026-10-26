@@ -380,3 +380,42 @@ input:focus, select:focus, textarea:focus { outline: 2px solid var(--accent-soft
 .cat-pick .hint { flex-basis: 100%; margin: 0; }
 #subFilter { max-width: 180px; }
 .form.is-compliance .c-only, .form:not(.is-compliance) .k-only { display: none; }
+
+/* ---------- overview by category ---------- */
+.overview { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; margin-top: 16px; }
+.ov-card { text-align: left; font: inherit; color: inherit; cursor: pointer; padding: 16px; display: flex; flex-direction: column; gap: 10px; }
+.ov-card:hover { border-color: var(--border-strong); }
+.ov-head { display: flex; justify-content: space-between; align-items: baseline; gap: 8px; }
+.ov-head .cat-tag { font-size: 12px; padding: 2px 8px; }
+.ov-total { font-size: 26px; font-weight: 700; letter-spacing: -0.02em; font-variant-numeric: tabular-nums; }
+.ov-total small { font-size: 12px; font-weight: 500; color: var(--text-3); margin-left: 4px; letter-spacing: 0; }
+.ov-bar { display: flex; height: 8px; border-radius: 999px; overflow: hidden; background: var(--track); gap: 2px; }
+.ov-bar span { display: block; height: 100%; }
+.ov-bar .good { background: var(--good); } .ov-bar .warning { background: var(--warning); } .ov-bar .critical { background: var(--critical); }
+.ov-legend { display: flex; flex-wrap: wrap; gap: 4px 12px; font-size: 12px; color: var(--text-2); }
+.ov-legend span { display: inline-flex; align-items: center; gap: 5px; font-variant-numeric: tabular-nums; }
+.ov-legend i { width: 8px; height: 8px; border-radius: 2px; display: inline-block; }
+.ov-legend .good i { background: var(--good); } .ov-legend .warning i { background: var(--warning); } .ov-legend .critical i { background: var(--critical); }
+.ov-subs { list-style: none; margin: 0; padding: 8px 0 0; border-top: 1px solid var(--border); display: flex; flex-direction: column; gap: 4px; font-size: 13px; }
+.ov-subs li { display: flex; justify-content: space-between; gap: 8px; color: var(--text-2); }
+.ov-subs b { color: var(--text); font-variant-numeric: tabular-nums; }
+.ov-next { font-size: 12px; color: var(--text-3); }
+.ov-next strong { color: var(--text-2); font-weight: 600; }
+
+/* ---------- calendar ---------- */
+.cal-box { border: 1px solid var(--border); border-radius: 12px; padding: 12px 14px; display: flex; flex-direction: column; gap: 8px; align-items: flex-start; }
+.cal-box h3 { margin: 0; }
+.cal-box p { margin: 0; font-size: 13px; }
+.steps { margin: 0; padding-left: 20px; display: flex; flex-direction: column; gap: 10px; color: var(--text-2); }
+.steps li { padding-left: 2px; }
+.steps input { margin-top: 6px; }
+.script-row { display: flex; align-items: center; gap: 10px; margin: 6px 0; }
+.script { max-height: 180px; overflow: auto; font-size: 11px; background: var(--surface-2); border-radius: 8px; padding: 10px; white-space: pre; }
+.foot-right { display: inline-flex; gap: 8px; margin-left: auto; }
+.cal-link { display: inline-grid; place-items: center; width: 26px; height: 26px; border-radius: 6px; color: var(--text-3); flex: none; text-decoration: none; }
+.cal-link:hover { background: var(--surface-2); color: var(--accent); }
+.cal-state { display: flex; gap: 10px; align-items: flex-start; padding: 10px 12px; border-radius: 10px; background: var(--surface-2); font-size: 13px; }
+.cal-state.err { background: color-mix(in srgb, var(--critical) 12%, transparent); }
+.cal-state .ms-body p { margin: 0; color: var(--text-2); }
+@media (max-width: 1100px) { .overview { grid-template-columns: minmax(0, 1fr); } }
+@media (max-width: 600px) { .foot-right { flex-direction: column-reverse; } .modal-foot.split { flex-wrap: wrap; } }

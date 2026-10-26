@@ -20,6 +20,25 @@ documents use their own fields (period, reference no. such as ARN / SRN, GSTIN /
 date, next due date, amount paid) and show "Due soon" / "Overdue" instead of contract statuses. For
 monthly GSTR-3B and GSTR-1 returns the next due date (20th / 11th) is suggested from the return period.
 
+## Google Calendar reminders
+
+Give each contract / document an **Owner email**. Its key dates then go to Google Calendar with the
+owner invited:
+
+- the closing / due date
+- the last day to give notice (contract end minus notice period)
+- a "Start renewal" / "Prepare filing" heads-up (14–90 days before, set in Settings)
+- open milestones
+
+**Automatic (recommended):** Settings → Google Calendar → Set up. You paste the script from
+`apps-script/Code.gs` (the dashboard fills in a private key) into a new Google Apps Script project
+and deploy it as a web app ("Execute as: Me", "Who has access: Anyone"). It runs under your Google
+account, so the events sit in your calendar for follow-up and owners receive invitations. Events are
+updated when dates change and removed when a milestone is ticked off or an item is deleted.
+
+**Manual:** without the set-up, the calendar icon next to each date opens Google Calendar with the
+event pre-filled and the owner added as a guest.
+
 ## How it is put together
 
 | Piece | Where it lives | Who can see it |
@@ -55,4 +74,6 @@ Notes:
 - `js/store.js`: reading and writing the private data repository through the GitHub API
 - `js/extract.js`: text extraction and fact detection
 - `js/app.js`: dashboard behaviour
+- `js/calendar.js`: Google Calendar events and links
+- `apps-script/Code.gs`: the Google Apps Script that writes calendar events
 - `vendor/`: PDF.js 3.11.174 and Mammoth 1.6.0, served locally

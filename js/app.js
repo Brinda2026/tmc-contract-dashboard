@@ -5,6 +5,8 @@
 
   const { GitHubStore, loadConfig, saveConfig, clearConfig } = window.ContractStore;
   const { readText, analyze, addTerm, parseTenure, classify } = window.ContractExtract;
+  const Cal = window.ContractCalendar;
+  const SITE = location.origin + location.pathname;
 
   const $ = (s, el = document) => el.querySelector(s);
   const $$ = (s, el = document) => [...el.querySelectorAll(s)];
@@ -13,6 +15,7 @@
     cfg: null,
     store: null,
     contracts: [],
+    settings: {},
     filter: 'all',
     search: '',
     sort: { key: 'endDate', dir: 1 },
@@ -148,6 +151,7 @@
     try {
       const data = await state.store.loadIndex();
       state.contracts = data.contracts;
+      state.settings = data.settings || {};
       state.lastLoaded = new Date();
       showDashboard();
     } catch (e) {
@@ -192,6 +196,7 @@
   function render() {
     renderTabs();
     renderKpis();
+    renderOverview();
     renderFilters();
     renderTable();
     renderTimeline();
@@ -251,6 +256,32 @@
         <span class="kpi-value sm">${next ? esc(relDays(daysUntil(next.date))) : '—'}</span>
         <span class="kpi-sub">${next ? `${esc(fmtDate(next.date))} · ${esc(next.contract.title)}` : 'nothing scheduled'}</span>
       </button>`;
+  }
+
+  function renderOverview() {
+    const el = $('#overview');
+    el.hidden = state.category !== 'all' || !state.contracts.length;
+    if (el.hidden) return;
+    el.innerHTML = Object.entries(CATEGORIES).map(([k, v]) => {
+      const list = state.contracts.filter((c) => c.category === k);
+      const comp = k === 'compliance';
+      let ok = 0, soon = 0, late = 0, next = null;
+      for (const c of list) {
+        const st = statusOf(c);
+        if (st === 'expiring') soon++; else if (st === 'expired') late++; else ok++;
+        const n = nextEvent(c);
+        if (n && (!next || n.date < next.date)) next = n;
+      }
+      const legend = [[ok, 'good', comp ? 'Up to date' : 'Active'], [soon, 'warning', comp ? 'Due soon' : 'Expiring soon'], [late, 'critical', comp ? 'Overdue' : 'Expired']];
+      const bar = list.length ? legend.filter(([n]) => n).map(([n, cls]) => `<span class="${cls}" style="flex:${n}"></span>`).join('') : '';
+      return `<button class="card ov-card" data-cat="${k}" title="Show ${v.label}">
+        <div class="ov-head"><span class="cat-tag ${k}">${v.label}</span><span class="ov-total">${list.length}<small>${comp ? 'documents' : 'contracts'}</small></span></div>
+        <div class="ov-bar" role="img" aria-label="${legend.map((l) => `${l[2]}: ${l[0]}`).join(', ')}">${bar}</div>
+        <div class="ov-legend">${legend.map(([n, cls, l]) => `<span class="${cls}"><i></i>${l} ${n}</span>`).join('')}</div>
+        <ul class="ov-subs">${v.subtypes.map((sub) => `<li><span>${esc(sub)}</span><b>${list.filter((c) => c.subtype === sub).length}</b></li>`).join('')}</ul>
+        <div class="ov-next">${next ? `Next: <strong>${esc(next.label)}</strong> · ${fmtDate(next.date)} (${esc(relDays(daysUntil(next.date)))})` : 'Nothing scheduled'}</div>
+      </button>`;
+    }).join('');
   }
 
   const FILTERS = [
@@ -368,6 +399,20 @@
     const noticeDate = c.endDate && Number(c.noticeDays) > 0 ? addDays(c.endDate, -Number(c.noticeDays)) : null;
     const fact = (label, value, sub) => `<div class="fact"><dt>${label}</dt><dd>${value ? esc(value) : '<span class="muted">Not set</span>'}${sub ? `<span class="t-sub">${esc(sub)}</span>` : ''}</dd></div>`;
     const events = eventsOf(c);
+    const calEv = Object.fromEntries(Cal.buildEvents(c, state.settings.calendar || {}, SITE).map((e) => [e.key, e]));
+    const calKey = (e) => (e.kind === 'end' || e.kind === 'due' ? 'due' : e.kind === 'notice' ? 'notice' : e.kind === 'milestone' ? `ms-${e.id}` : '');
+    const calIcon = '<svg viewBox="0 0 24 24" width="15" height="15" aria-hidden="true"><rect x="3.5" y="5" width="17" height="15.5" rx="2" fill="none" stroke="currentColor" stroke-width="1.8"/><path d="M3.5 10h17M8 3v4M16 3v4M12 13v5M9.5 15.5h5" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>';
+    const guests = Cal.guestsFor(c, state.settings.calendar);
+    const cal = calCfg();
+    const synced = c.calendar?.syncedAt;
+    const calBlock = cal
+      ? `<div class="cal-state ${c.calendarError ? 'err' : ''}"><div class="ms-body">
+          ${c.calendarError ? `<div><strong>Calendar sync failed</strong></div><p>${esc(c.calendarError)}</p>`
+            : synced ? `<div><strong>In Google Calendar</strong> · ${Object.keys(c.calendar.events || {}).length} date(s)</div><p>${guests.length ? `Invited: ${esc(guests.join(', '))}` : 'Only in your calendar (no owner email yet).'} · synced ${esc(new Date(synced).toLocaleString('en-GB', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' }))}</p>`
+            : `<div><strong>Not in Google Calendar yet</strong></div><p>Dates are added when you save; you can also sync now.</p>`}
+          ${!c.ownerEmail ? '<p>Add an <em>owner email</em> (Edit details) so the owner is invited to these dates.</p>' : ''}
+        </div><button class="btn ghost sm" data-action="cal-sync">Sync now</button></div>`
+      : `<div class="cal-state"><div class="ms-body"><div><strong>Automatic reminders are off</strong></div><p>Use the calendar icon next to a date to add it to Google Calendar${guests.length ? ` with ${esc(guests.join(', '))} invited` : ''}, or turn on automatic reminders.</p></div><button class="btn ghost sm" data-action="cal-setup">Set up</button></div>`;
 
     $('#drawerBody').innerHTML = `
       <div class="drawer-head">
@@ -400,7 +445,7 @@
         ${fact('Next due date / valid until', c.endDate && fmtDate(c.endDate), c.dueSuggested ? 'suggested from the return period, please check' : '')}
         ${fact('Amount paid', c.value)}
         ${fact('Registration IDs', c.ids)}
-        ${fact('Owner at TMC', c.owner)}
+        ${fact('Owner at TMC', c.owner, c.ownerEmail)}
       </dl>` : `<dl class="facts">
         ${fact('Counterparty', c.counterparty)}
         ${fact('Parties', c.parties)}
@@ -409,7 +454,7 @@
         ${fact('Tenure', c.tenure)}
         ${fact('Contract value', c.value)}
         ${fact('Notice period', c.noticeDays ? `${c.noticeDays} days` : '', noticeDate ? `give notice by ${fmtDate(noticeDate)}` : '')}
-        ${fact('Owner at TMC', c.owner)}
+        ${fact('Owner at TMC', c.owner, c.ownerEmail)}
         ${fact('Governing law', c.governingLaw)}
       </dl>`}
       ${c.fees ? `<div class="block"><h3>Fees &amp; payment terms</h3><p class="pre">${esc(c.fees)}</p></div>` : ''}
@@ -429,6 +474,7 @@
                 <div>${esc(e.label)}</div>
                 <div class="t-sub">${fmtDate(e.date)} · ${e.done ? 'done' : late ? 'overdue ' + relDays(d).replace(' ago', '') : esc(relDays(d))}</div>
               </div>
+              ${!e.done && d >= 0 && calEv[calKey(e)] ? `<a class="cal-link" href="${esc(Cal.gcalLink(calEv[calKey(e)]))}" target="_blank" rel="noopener" title="Add to Google Calendar${guests.length ? ' (invites ' + esc(guests.join(', ')) + ')' : ''}" aria-label="Add to Google Calendar">${calIcon}</a>` : ''}
               ${isMs ? `<button class="icon-btn sm" data-action="del-ms" data-ms="${esc(e.id)}" aria-label="Remove milestone">✕</button>` : ''}
             </li>`;
           }).join('') : '<li class="muted">No dates yet.</li>'}
@@ -438,6 +484,11 @@
           <input name="label" required placeholder="New milestone, e.g. Q1 payment due" aria-label="Milestone description">
           <button class="btn ghost sm" type="submit">Add</button>
         </form>
+      </div>
+
+      <div class="block">
+        <h3>Google Calendar</h3>
+        ${calBlock}
       </div>
 
       <div class="block file">
@@ -461,13 +512,17 @@
     if (!c) return;
     try {
       if (action === 'close') closeDrawer();
+      else if (action === 'cal-sync') await syncCalendar(c.id);
+      else if (action === 'cal-setup') openCalDialog();
       else if (action === 'edit') openEdit(c);
       else if (action === 'toggle') {
         const id = el.dataset.ms, done = el.checked;
         await save((d) => { const m = find(d, c.id)?.milestones.find((x) => x.id === id); if (m) m.done = done; }, `Update milestone on ${c.title}`, true);
+        syncCalendar(c.id, true);
       } else if (action === 'del-ms') {
         const id = el.dataset.ms;
         await save((d) => { const x = find(d, c.id); if (x) x.milestones = x.milestones.filter((m) => m.id !== id); }, `Remove milestone from ${c.title}`, true);
+        syncCalendar(c.id, true);
       } else if (action === 'download' || action === 'view') {
         busy('Fetching document…');
         const blob = await state.store.downloadFile(c.file.path);
@@ -480,6 +535,9 @@
       } else if (action === 'delete') {
         if (!confirm(`Delete “${c.title}” and its file? This cannot be undone from the dashboard.`)) return;
         busy('Deleting…');
+        if (calCfg() && Object.keys(c.calendar?.events || {}).length) {
+          try { await Cal.call(calCfg(), { action: 'remove', existing: c.calendar.events }); } catch (e) { toast(`Deleted, but its calendar events could not be removed: ${e.message}`, 'err'); }
+        }
         if (c.file) await state.store.deleteFile(c.file.path);
         await save((d) => { d.contracts = d.contracts.filter((x) => x.id !== c.id); }, `Delete ${c.title}`);
         closeDrawer();
@@ -493,6 +551,97 @@
 
   function find(data, id) { return data.contracts.find((x) => x.id === id); }
 
+  // ---------- Google Calendar ----------
+
+  function calCfg() { const c = state.settings?.calendar; return c?.url && c?.key ? c : null; }
+
+  async function syncCalendar(id, quiet) {
+    const cal = calCfg();
+    const c = state.contracts.find((x) => x.id === id);
+    if (!cal || !c) return false;
+    const events = Cal.eventsToSync(c, cal, SITE);
+    const existing = c.calendar?.events || {};
+    if (!events.length && !Object.keys(existing).length) return true;
+    try {
+      const r = await Cal.call(cal, { action: 'sync', events, existing });
+      const info = { events: r.events || {}, syncedAt: new Date().toISOString() };
+      await save((d) => { const x = find(d, id); if (x) x.calendar = info; }, `Calendar sync for ${c.title}`, true);
+      if (!quiet) {
+        const g = Cal.guestsFor(c, cal);
+        toast(`Added ${events.length} date(s) to Google Calendar${g.length ? ', invited ' + g.join(', ') : ''}`);
+      }
+      return true;
+    } catch (e) {
+      const x = state.contracts.find((y) => y.id === id);
+      if (x) x.calendarError = e.message;
+      if (state.openId === id) renderDrawer();
+      if (!quiet) toast(`Calendar: ${e.message}`, 'err');
+      return false;
+    }
+  }
+
+  async function syncAll() {
+    const list = state.contracts.filter((c) => c.endDate || (c.milestones || []).some((m) => !m.done) || c.calendar);
+    let failed = 0;
+    for (let i = 0; i < list.length; i++) {
+      busy(`Adding dates to Google Calendar… ${i + 1} / ${list.length}`);
+      if (!(await syncCalendar(list[i].id, true))) failed++;
+    }
+    busy(null);
+    toast(failed ? `${list.length - failed} of ${list.length} synced; ${failed} failed (open them to see why)` : `All ${list.length} item(s) are in Google Calendar`, failed ? 'err' : '');
+  }
+
+  async function saveSettings(patch) {
+    const data = await state.store.mutate((d) => { d.settings = { ...(d.settings || {}), ...patch }; }, 'Update dashboard settings');
+    state.settings = data.settings || {};
+    state.contracts = data.contracts;
+  }
+
+  let scriptTemplate = '';
+  async function openCalDialog() {
+    const f = $('#calForm');
+    const cal = state.settings.calendar || {};
+    state.calKey = cal.key || Cal.newKey();
+    f.url.value = cal.url || '';
+    f.leadDays.value = String(cal.leadDays ?? 30);
+    f.alwaysInvite.value = cal.alwaysInvite || '';
+    $('#calOffBtn').hidden = !cal.url;
+    $('#calMsg').hidden = true;
+    $('#copyMsg').textContent = '';
+    if ($('#settingsDialog').open) $('#settingsDialog').close();
+    $('#calDialog').showModal();
+    try {
+      if (!scriptTemplate) scriptTemplate = await (await fetch('apps-script/Code.gs', { cache: 'no-store' })).text();
+      $('#scriptText').textContent = scriptTemplate.replace('__SECRET__', state.calKey);
+    } catch {
+      $('#scriptText').textContent = 'Could not load the script. Reload the page and try again.';
+    }
+  }
+
+  function calMsg(text, kind) {
+    const m = $('#calMsg');
+    m.hidden = !text;
+    m.className = 'notice ' + (kind || '');
+    m.textContent = text || '';
+  }
+
+  async function testCal() {
+    const url = $('#calForm').url.value.trim();
+    if (!/^https:\/\/script\.google\.com\/macros\/s\/[\w-]+\/exec$/.test(url)) {
+      calMsg('Paste the Web app URL from step 4. It looks like https://script.google.com/macros/s/…/exec', 'warn');
+      return null;
+    }
+    calMsg('Checking the connection…');
+    try {
+      const r = await Cal.call({ url, key: state.calKey }, { action: 'ping' });
+      calMsg(`Connected to the calendar “${r.calendar}”${r.account ? ' of ' + r.account : ''}.`, 'ok');
+      return url;
+    } catch (e) {
+      calMsg(e.message, 'warn');
+      return null;
+    }
+  }
+
   async function save(fn, message, quiet) {
     if (!quiet) busy('Saving…');
     try {
@@ -503,6 +652,7 @@
       showDashboard();
       const data = await state.store.mutate(fn, message);
       state.contracts = data.contracts;
+      state.settings = data.settings || {};
       state.lastLoaded = new Date();
       showDashboard();
     } catch (e) {
@@ -561,7 +711,7 @@
 
   function fillFields(v) {
     const f = $('#editForm');
-    for (const k of ['title', 'counterparty', 'type', 'parties', 'effectiveDate', 'endDate', 'tenure', 'value', 'noticeDays', 'owner', 'governingLaw', 'renewal', 'fees', 'notes', 'period', 'reference', 'ids']) {
+    for (const k of ['title', 'counterparty', 'type', 'parties', 'effectiveDate', 'endDate', 'tenure', 'value', 'noticeDays', 'owner', 'governingLaw', 'renewal', 'fees', 'notes', 'period', 'reference', 'ids', 'ownerEmail']) {
       if (f[k]) f[k].value = v[k] ?? '';
     }
   }
@@ -682,10 +832,12 @@
       noticeDays: get('noticeDays') ? Number(get('noticeDays')) : '', owner: get('owner'), governingLaw: get('governingLaw'),
       renewal: get('renewal'), fees: get('fees'), notes: get('notes'), milestones: readMilestones(),
       category: f.category.value, subtype: f.subtype.value, period: get('period'), reference: get('reference'), ids: get('ids'),
+      ownerEmail: Cal.emails(get('ownerEmail')).join(', '),
       dueSuggested: !!(state.dueSuggested && get('endDate')),
     };
     if (!CATEGORIES[fields.category]) { err.textContent = 'Please choose a category: B2B, RTD or Compliance.'; err.hidden = false; return; }
     if (!fields.title) { err.textContent = 'Please give it a name.'; err.hidden = false; return; }
+    if (get('ownerEmail') && !fields.ownerEmail) { err.textContent = 'The owner email does not look right.'; err.hidden = false; return; }
     if (fields.category === 'compliance') {
       // contract-only fields don't apply to compliance documents
       Object.assign(fields, { type: '', parties: '', tenure: '', noticeDays: '', governingLaw: '', renewal: '', fees: '' });
@@ -698,6 +850,7 @@
         $('#editDialog').close();
         await save((d) => { const c = find(d, id); if (c) Object.assign(c, fields, { updatedAt: new Date().toISOString() }); }, `Update ${fields.title}`);
         toast('Changes saved');
+        syncCalendar(id);
       } else {
         const file = state.pendingFile;
         const id = uid();
@@ -711,6 +864,7 @@
         await save((d) => { d.contracts.push(record); }, `Add ${fields.title}`);
         toast('Saved');
         openDrawer(id);
+        syncCalendar(id);
       }
     } catch (e) {
       busy(null);
@@ -763,6 +917,12 @@
       f.dateFormat.value = state.cfg?.dateFormat || 'DMY';
       $('#settingsConn').textContent = state.store ? `Connected to ${state.cfg.owner}/${state.cfg.repo} (${state.cfg.branch}).` : 'Not connected.';
       $('#disconnectBtn').hidden = !state.store;
+      const cal = calCfg();
+      $('#calStatus').textContent = cal
+        ? `On. Dates go to the Google Calendar the script runs under, with each item's owner invited; heads-up ${cal.leadDays ?? 30} days before.`
+        : 'Off. Owners can still be added to a date one at a time with the calendar icon next to it.';
+      $('#calSetupBtn').textContent = cal ? 'Change' : 'Set up';
+      $('#calSetupBtn').hidden = !state.store;
       $('#settingsDialog').showModal();
     });
     $('#settingsForm').addEventListener('submit', () => {
@@ -821,6 +981,7 @@
       try {
         await save((d) => { const x = find(d, c.id); if (x) (x.milestones = x.milestones || []).push({ id: uid(), date, label, done: false }); }, `Add milestone to ${c.title}`, true);
         toast('Milestone added');
+        syncCalendar(c.id, true);
       } catch (err) { toast(err.message, 'err'); }
     });
 
@@ -839,6 +1000,30 @@
       $('#msEdit li:last-child .ms-date').focus();
     });
     $('#editForm').addEventListener('submit', submitEdit);
+    $('#calSetupBtn').addEventListener('click', openCalDialog);
+    $('#calTestBtn').addEventListener('click', testCal);
+    $('#copyScriptBtn').addEventListener('click', async () => {
+      const text = $('#scriptText').textContent;
+      try { await navigator.clipboard.writeText(text); $('#copyMsg').textContent = 'Copied. Paste it into the script editor.'; }
+      catch { const d = $('#scriptText').closest('details'); d.open = true; getSelection().selectAllChildren($('#scriptText')); $('#copyMsg').textContent = 'Press Ctrl+C (Cmd+C) to copy the selected script.'; }
+    });
+    $('#calForm').addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const f = e.target;
+      const url = await testCal();
+      if (!url) return;
+      try {
+        await saveSettings({ calendar: { url, key: state.calKey, leadDays: Number(f.leadDays.value), alwaysInvite: Cal.emails(f.alwaysInvite.value).join(', ') } });
+        $('#calDialog').close();
+        render();
+        await syncAll();
+      } catch (err) { calMsg(err.message, 'warn'); }
+    });
+    $('#calOffBtn').addEventListener('click', async () => {
+      if (!confirm('Turn off automatic Google Calendar reminders? Events already in the calendar stay there.')) return;
+      try { await saveSettings({ calendar: null }); $('#calDialog').close(); render(); if (state.openId) renderDrawer(); toast('Calendar reminders turned off'); }
+      catch (err) { calMsg(err.message, 'warn'); }
+    });
     $('#rescanBtn').addEventListener('click', rescan);
     ['effectiveDate', 'tenure'].forEach((k) => $(`#editForm [name=${k}]`).addEventListener('input', recalcEnd));
     $('#editForm [name=endDate]').addEventListener('input', () => { state.autoEnd = false; state.dueSuggested = false; $('#endHint').textContent = ''; });
